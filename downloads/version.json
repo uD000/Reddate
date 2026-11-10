@@ -1,7 +1,7 @@
 {
- "versionCode": 44,
- "versionName": "0.4.4",
- "size": 3270319,
- "sha256": "87883d1dbd761963dd2338fd4dc7999cbf91e22076d2eb229e9dddb76b73353c",
- "notes": "New: Subtitles stay in sync across TVs|Late viewers open at the live position|Five-character party codes shared with the browser, with copy buttons|Guests start with the host's audio and subtitle languages|Poster titles on the home screen and simpler party creation"
+ "versionCode": 45,
+ "versionName": "0.4.5",
+ "size": 3270312,
+ "sha256": "b3989fe60f2c9cdd8a49c763816c8df2d73045730cde3f6189d060a090d569b3",
+ "notes": "New: Other streams in the player's Browse panel: pick another source for what's playing and carry on from where you were|Picking a different episode no longer starts it at another episode's resume point"
 }

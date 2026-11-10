@@ -26,8 +26,8 @@ android {
         applicationId = "xyz.reddate.tv"
         minSdk = 23
         targetSdk = 34
-        versionCode = 44
-        versionName = "0.4.4"
+        versionCode = 45
+        versionName = "0.4.5"
     }
 
     signingConfigs {
