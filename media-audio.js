@@ -210,6 +210,12 @@ function registerMediaAudio(app, options = {}) {
     function unavailable(res) {
         return res.status(503).json({ error: 'This server needs FFmpeg and ffprobe to switch embedded audio tracks.' });
     }
+    function ownsSession(req, session) {
+        // A hosting proxy can change req.ip between chunks. New clients prove
+        // ownership with a random browser key plus the random session token.
+        // Keep the IP check for older clients that do not send a browser key.
+        return session.client ? session.client === req.get('X-Reddate-Audio-Client') : session.owner === req.ip;
+    }
     const sweep = setInterval(() => {
         const now = Date.now();
         for (const [id, s] of sessions) if (s.expires < now) sessions.delete(id);
@@ -228,8 +234,10 @@ function registerMediaAudio(app, options = {}) {
         if (++rate.count > 12 || rates.size > 10000) return res.status(429).json({ error: 'Too many audio lookups. Try again shortly.' });
         const signal = clientSignal(res);
         try {
+            const client = req.get('X-Reddate-Audio-Client');
+            if (client && !/^[a-f0-9]{32}$/.test(client)) return res.status(400).json({ error: 'Invalid audio client.' });
             const url = sourceUrl(req.body && req.body.url).href;
-            const own = [...sessions.values()].filter(s => s.owner === owner);
+            const own = [...sessions.values()].filter(s => s.owner === owner && s.expires >= now);
             if (sessions.size >= 64 || own.length >= 6) throw new Error('Too many active videos. Close another player first.');
             const data = await run(ffprobe, input => [
                 '-v', 'error', '-protocol_whitelist', 'http,tcp', '-format_whitelist', FORMATS,
@@ -247,7 +255,7 @@ function registerMediaAudio(app, options = {}) {
             if (!tracks.some(t => t.isDefault)) tracks[0].isDefault = true;
             if (signal.aborted) return;
             const token = crypto.randomBytes(24).toString('hex');
-            sessions.set(token, { url, tracks, owner, expires: Date.now() + SESSION_TTL });
+            sessions.set(token, { url, tracks, owner, client, expires: Date.now() + SESSION_TTL });
             res.json({ token, tracks, segmentSeconds: SEGMENT_SECONDS, duration: Number(metadata.format?.duration) || null });
         } catch (e) {
             if (!signal.aborted) res.status(502).json({ error: e.message.startsWith('Invalid') ? 'Invalid video URL.' : e.message });
@@ -257,7 +265,7 @@ function registerMediaAudio(app, options = {}) {
     app.get('/api/audio/:token/:track/:start', async (req, res) => {
         res.set({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
         const session = sessions.get(req.params.token);
-        if (!session || session.owner !== req.ip || session.expires < Date.now()) return res.status(404).end();
+        if (!session || !ownsSession(req, session) || session.expires < Date.now()) return res.status(404).json({ error: 'Audio session expired. Reconnect the selected audio.' });
         const track = Number(req.params.track), start = Number(req.params.start);
         if (!session.tracks.some(t => t.index === track) || !Number.isInteger(start) || start < 0 || start > 86400 || start % SEGMENT_SECONDS) return res.status(400).end();
         session.expires = Date.now() + SESSION_TTL;
@@ -271,13 +279,14 @@ function registerMediaAudio(app, options = {}) {
                 '-ss', String(start), '-i', input, '-t', String(SEGMENT_SECONDS), '-map', `0:${track}`,
                 '-vn', '-sn', '-dn', '-ac', '2', '-ar', '48000', '-af', `asetpts=PTS-STARTPTS,apad=whole_dur=${SEGMENT_SECONDS}`,
                 '-c:a', 'pcm_s16le', '-f', 'wav', 'pipe:1'
-            ], session.url, req.ip, signal, 4 * 1024 * 1024);
+            ], session.url, session.owner, signal, 4 * 1024 * 1024);
             if (!signal.aborted) res.type('audio/wav').send(data);
         } catch (e) { if (!signal.aborted) res.status(502).json({ error: e.message }); }
     });
 
     app.delete('/api/audio/:token', (req, res) => {
-        if (sessions.get(req.params.token)?.owner === req.ip) sessions.delete(req.params.token);
+        const session = sessions.get(req.params.token);
+        if (session && ownsSession(req, session)) sessions.delete(req.params.token);
         res.status(204).end();
     });
     return { enabled, close() {
