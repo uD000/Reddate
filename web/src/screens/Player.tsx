@@ -145,7 +145,9 @@ export function Player({ open, onClose }: { open: OpenInfo; onClose: (immediate?
         const isHls = !isYt && /\.m3u8($|\?)/i.test(src);
         if (!isYt) { v.preload = 'auto'; v.setAttribute('playsinline', ''); }
         if (isYt) { /* the YouTube player loads itself */ }
-        else if (isHls && Hls.isSupported() && !(v.canPlayType('application/vnd.apple.mpegurl') && v.audioTracks)) {
+        // Native HLS whenever the browser has it (Safari, Chrome 141+): it picks audio the device can decode
+        // (AAC next to Dolby) and needs no CORS. Requiring v.audioTracks too sent Chrome to hls.js: silent Dolby.
+        else if (isHls && Hls.isSupported() && !v.canPlayType('application/vnd.apple.mpegurl')) {
             const h = new Hls({ maxBufferLength: 40, enableWorker: true });
             hls.current = h;
             h.on(Hls.Events.ERROR, (_e, d) => { if (d.fatal) fail(d.details || 'HLS'); });

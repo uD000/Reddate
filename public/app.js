@@ -1589,8 +1589,11 @@ function createDirectPlayer(src) {
     currentSrc = src;
     const v = document.createElement('video');
     let hls = null;
-    if (isHlsUrl(src) && !(v.canPlayType('application/vnd.apple.mpegurl') && v.audioTracks)) {
-        // Chrome/Firefox need hls.js; Safari plays HLS natively via v.src.
+    // Native HLS whenever the browser has it (Safari, and Chrome since 141): it picks an audio rendition the
+    // device can decode (AAC next to Dolby) and needs no CORS. hls.js is only for browsers without it (Firefox).
+    // Don't require v.audioTracks here: Chrome has native HLS but no audioTracks, and sending it to hls.js
+    // left Dolby streams silent and CORS-less streams unplayable.
+    if (isHlsUrl(src) && !v.canPlayType('application/vnd.apple.mpegurl')) {
         loadHlsJs().then(Hls => {
             if (currentSrc !== src || !Hls || !Hls.isSupported()) return;
             hls = new Hls();
