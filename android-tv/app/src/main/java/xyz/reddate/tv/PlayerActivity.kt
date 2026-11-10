@@ -45,6 +45,11 @@ class PlayerActivity : Activity() {
         @Volatile var pickingVideo = false
         /** A title picked from the player's Browse panel (a host picked something else): Home opens it on its streams. */
         @Volatile var pendingTitle: String? = null
+        /** "Other streams": Home opens the title that was playing at its streams (a show at this episode), and the
+         *  stream picked there starts at this position, in seconds. */
+        @Volatile var pendingStreamsEpisode: String = ""
+        @Volatile var pendingStreamsAt: Int = 0
+        @Volatile var pendingStreams: Boolean = false
         /** Set when "Watch together" starts a video: the invite panel opens by itself once it plays. */
         @Volatile var openInviteAt = 0L
     }
@@ -411,6 +416,8 @@ class PlayerActivity : Activity() {
 
     /** A host goes back to the menus to pick something else; the party stays, and what they pick plays for everyone. */
     fun changeVideo() { pickingVideo = true; finish() }
+    /** Where the picture is now, in seconds. */
+    fun positionSec(): Int = ((player?.currentPosition ?: 0L) / 1000L).toInt()
     fun emitSyncAnswer(yes: Boolean) = emit("sync-answer") { put("yes", yes) }
 
     /** Leave the room (ending it for everyone if you're the host) and go back to Home. */

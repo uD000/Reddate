@@ -88,7 +88,8 @@ export function Player({ open, onClose }: { open: OpenInfo; onClose: (immediate?
     const [volume, setVolume] = useState<number>(() => { try { const v = parseFloat(localStorage.getItem('rd-vol') || ''); return isFinite(v) ? Math.min(1, Math.max(0, v)) : 1; } catch { return 1; } });
     const [muted, setMuted] = useState(false);
     const [noAudio, setNoAudio] = useState(false);
-    const [picker, setPicker] = useState(false);
+    // 'video' opens the catalog (another movie or show); 'streams' opens what's playing at its stream list.
+    const [picker, setPicker] = useState<false | 'video' | 'streams'>(false);
     const [ignoreBehindUntil, setIgnoreBehindUntil] = useState(0);
 
     const expectPlay = useRef<boolean | null>(null);
@@ -409,7 +410,12 @@ export function Player({ open, onClose }: { open: OpenInfo; onClose: (immediate?
     useEffect(() => { if (panel && !phone()) setUi(true); else poke(); }, [panel, poke]);
 
     useBackClose(!!panel, () => setPanel(''));
-    useBackClose(picker, () => setPicker(false));
+    useBackClose(!!picker, () => setPicker(false));
+    // The addon title that's playing: a movie, or a show at its episode. A bare link or YouTube has none.
+    const here = !isYt && info.current ? {
+        id: String(info.show || info.current), type: String(info.ctype || (info.show ? 'series' : 'movie')),
+        name: String(info.showName || title), episodeId: info.show ? String(info.current) : ''
+    } : null;
 
     // ---- keyboard ----
     useEffect(() => {
@@ -634,7 +640,7 @@ export function Player({ open, onClose }: { open: OpenInfo; onClose: (immediate?
                     <div className="noaudio" role="status">
                         <b>No sound?</b> This stream’s audio (Dolby Digital+, DTS…) can’t play in a browser.
                         <span>
-                            {iAmHostNow() && <button className="btn small" onClick={() => { setNoAudio(false); setPicker(true); }}>Pick another stream</button>}
+                            {iAmHostNow() && <button className="btn small" onClick={() => { setNoAudio(false); setPicker(here ? 'streams' : 'video'); }}>Pick another stream</button>}
                             <button className="btn small ghost" onClick={() => setNoAudio(false)}>Dismiss</button>
                         </span>
                     </div>
@@ -661,7 +667,8 @@ export function Player({ open, onClose }: { open: OpenInfo; onClose: (immediate?
                             <button className="ibtn" onClick={() => setMuted(m => !m)} aria-label={muted || volume === 0 ? 'Unmute' : 'Mute'}>{muted || volume === 0 ? <IMute width={18} height={18} /> : <IVolume width={18} height={18} />}</button>
                             {!IOS && <input type="range" min={0} max={1} step={0.02} value={muted ? 0 : volume} aria-label="Volume" onChange={e => { const x = parseFloat(e.target.value); setVolume(x); setMuted(x === 0); }} />}
                         </span>
-                        {iAmHostNow() && <button className="ibtn" onClick={() => setPicker(true)}><ISwap width={18} height={18} />Change video</button>}
+                        {iAmHostNow() && here && <button className="ibtn" onClick={() => setPicker('streams')}><IList width={18} height={18} />Other streams</button>}
+                        {iAmHostNow() && <button className="ibtn" onClick={() => setPicker('video')}><ISwap width={18} height={18} />Change video</button>}
                         {info.hostOnly && !iAmHost && <button className="ibtn" onClick={() => send({ type: 'action', action: 'sync' })}>Sync to {String(info.hostName || 'host').slice(0, 14)}</button>}
                         {!isYt && <button className="ibtn" onClick={() => setPanel(panel === 'subs' ? '' : 'subs')}><ISub width={18} height={18} />Subtitles</button>}
                         {!isYt && <button className="ibtn" onClick={() => { setPanel(panel === 'audio' ? '' : 'audio'); audioFallback.current?.load().then(() => audioRefresh.current()); }}><IAudio width={18} height={18} />Language</button>}
@@ -756,7 +763,7 @@ export function Player({ open, onClose }: { open: OpenInfo; onClose: (immediate?
                 </aside>
             )}
 
-            {picker && <Picker onClose={() => setPicker(false)} />}
+            {picker && <Picker onClose={() => setPicker(false)} start={picker === 'streams' && here ? here : undefined} startAt={picker === 'streams' ? Math.floor(vref.current?.currentTime || 0) : 0} />}
 
             {ask && (
                 <div className="modal" role="dialog" aria-modal="true">

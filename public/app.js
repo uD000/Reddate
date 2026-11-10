@@ -1369,7 +1369,7 @@ function createNativePlayer(src, opts) {
             people: roomUsers.map(u => ({ id: u.id, name: u.name, you: (u.ids || [u.id]).includes(socket.id), buffering: !!u.buffering, host: !!(party && (u.ids || [u.id]).some(i => party.host === i || (Array.isArray(party.hosts) && party.hosts.includes(i)))), main: !!(party && (u.ids || [u.id]).includes(party.host)) })).sort((a, b) => b.you - a.you),
             subs, subsLoading, roomSubtitle, roomAudio, isSettingsOwner: ownsRoomSettings(),
             subPref: window.tracks ? window.tracks.getPref() : '',
-            episodes, current: currentContent ? currentContent.id : '', show: currentContent ? (currentContent.show || '') : '', showName, autoNext: autoNextOn(),
+            episodes, current: currentContent ? currentContent.id : '', ctype: currentContent ? (currentContent.type || '') : '', show: currentContent ? (currentContent.show || '') : '', showName, autoNext: autoNextOn(),
             hostOnly: !!party, isHost: isHost(), isMain: !!(party && socket && party.host === socket.id), hostName: party ? party.hostName : '', guestsCanPause: !!(party && party.guestsCanPause),
             detached: !!(party && !isHost() && detached), behind: Math.round(Math.max(0, behindBy()))
         };

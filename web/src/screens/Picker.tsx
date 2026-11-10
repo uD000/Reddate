@@ -8,13 +8,18 @@ import { RowView, Row } from './Home';
 import { TitlePage } from './Title';
 import { IBack, IX, ISearch } from '../icons';
 
-/** "Change video": the catalog and search over the picture, which keeps playing. Picking a title replaces it for everyone. */
-export function Picker({ onClose }: { onClose: () => void }) {
+/** "Change video": the catalog and search over the picture, which keeps playing. Picking a title replaces it for everyone.
+ *  With `start` ("Other streams"), it opens on the title that's playing, at its streams (a show at its episode); the
+ *  new stream starts at `startAt` seconds. Back from there goes to the catalog, to change the movie or show instead. */
+export function Picker({ onClose, start, startAt = 0 }: {
+    onClose: () => void; start?: { id: string; type: string; name: string; episodeId: string }; startAt?: number;
+}) {
     const [rows, setRows] = useState<Row[] | null>(null);
     const [q, setQ] = useState('');
     const [res, setRes] = useState<Meta[] | null>(null);
     const [busy, setBusy] = useState(false);
-    const [title, setTitle] = useState<Meta | null>(null);
+    const [title, setTitle] = useState<Meta | null>(() => (start ? parseMeta({ id: start.id, type: start.type, name: start.name }, start.type) : null));
+    const atStart = !!start && !!title && title.id === start.id; // still on the title that's playing
     useBackClose(!!title, () => setTitle(null)); // Back: from a title to the list, then out of the picker
     const seq = useRef(0);
 
@@ -41,8 +46,8 @@ export function Picker({ onClose }: { onClose: () => void }) {
         <PickCtx.Provider value={m => setTitle(m)}>
             <div className="picker" role="dialog" aria-modal="true" aria-label="Change video">
                 <header>
-                    {title ? <button className="ibtn" onClick={() => setTitle(null)} aria-label="Back to the catalog"><IBack width={18} height={18} /></button> : null}
-                    <h2>{title ? title.name : 'Change video'}</h2>
+                    {title ? <button className="ibtn" onClick={() => setTitle(null)} aria-label="Back to the catalog" title="Change video: another movie or show"><IBack width={18} height={18} /></button> : null}
+                    <h2>{title ? (atStart ? `Other streams · ${title.name}` : title.name) : 'Change video'}</h2>
                     {!title && (
                         <label className="psearch"><ISearch width={18} height={18} />
                             <input autoFocus placeholder="Search movies and shows" value={q} onChange={e => setQ(e.target.value)} aria-label="Search" />
@@ -52,7 +57,8 @@ export function Picker({ onClose }: { onClose: () => void }) {
                 </header>
                 <div className="picker-body">
                     {title ? (
-                        <TitlePage key={title.id} type={title.type} id={title.id} embedded onPlayed={onClose} />
+                        <TitlePage key={title.id} type={title.type} id={title.id} embedded onPlayed={onClose}
+                            episodeId={atStart ? start!.episodeId : ''} startAt={atStart ? startAt : 0} />
                     ) : q.trim().length >= 2 ? (
                         <>
                             {busy && !res && <p className="note">Searching…</p>}

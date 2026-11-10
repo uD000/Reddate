@@ -16,8 +16,8 @@ function whyText(o: Json | null): string {
 }
 
 /** The streams for one movie or episode, grouped by quality. Picking one starts it. */
-function StreamList({ meta, streamKey, isSeries, label, together, onPlayed, forRoom }: {
-    meta: Meta; streamKey: string; isSeries: boolean; label: string; together: boolean; onPlayed: () => void; forRoom?: boolean;
+function StreamList({ meta, streamKey, isSeries, label, together, onPlayed, forRoom, startAt = 0 }: {
+    meta: Meta; streamKey: string; isSeries: boolean; label: string; together: boolean; onPlayed: () => void; forRoom?: boolean; startAt?: number;
 }) {
     useVerdicts();
     const { go, toast, refresh } = useApp();
@@ -87,7 +87,7 @@ function StreamList({ meta, streamKey, isSeries, label, together, onPlayed, forR
             else { try { sessionStorage.setItem('rd-starting', String(Date.now())); } catch { /* fine */ } }
             await engine.call('play', {
                 payload: {
-                    kind: 'direct', src: s.url, title: label,
+                    kind: 'direct', src: s.url, title: label, ...(startAt > 30 ? { startAt } : {}),
                     content: { type: meta.type, id: streamKey, filename: (s.filename || s.title).slice(0, 200), art: meta.background || meta.poster || undefined, show: isSeries ? meta.id : undefined }
                 }
             }, 30000);
@@ -147,7 +147,8 @@ function StreamList({ meta, streamKey, isSeries, label, together, onPlayed, forR
     );
 }
 
-export function TitlePage({ type, id, embedded, onPlayed }: { type: string; id: string; embedded?: boolean; onPlayed?: () => void }) {
+/** `episodeId` opens a show straight at that episode's streams; `startAt` (seconds) starts the picked stream there. */
+export function TitlePage({ type, id, embedded, onPlayed, episodeId: openEpisode = '', startAt = 0 }: { type: string; id: string; embedded?: boolean; onPlayed?: () => void; episodeId?: string; startAt?: number }) {
     const [moreText, setMoreText] = useState(false);
     const { metaCache, go, toast } = useApp();
     const [meta, setMeta] = useState<Meta | null>(() => { const m = metaCache.get(`${type}:${id}`); return m ? (m as Meta) : null; });
@@ -188,6 +189,15 @@ export function TitlePage({ type, id, embedded, onPlayed }: { type: string; id: 
         if (!meta || !isSeries || season !== null || seasons.length === 0) return;
         setSeason(seasons.find(s => s > 0) ?? seasons[0] ?? 0);
     }, [meta, isSeries, seasons, season]);
+    // "Other streams" for a show: straight to the episode that's playing, with its streams open.
+    const openedEpisode = useRef(false);
+    useEffect(() => {
+        if (!openEpisode || openedEpisode.current || !meta || !full) return;
+        const e = meta.episodes.find(x => x.id === openEpisode);
+        if (!e) return;
+        openedEpisode.current = true;
+        setSeason(e.season); setEpisode(e.id); setSheet(true);
+    }, [openEpisode, meta, full]);
 
     const streamKey = !meta || !full ? '' : isSeries ? episode : (meta.imdbId || (meta.id.startsWith('tmdb:') ? '' : meta.id));
     const label = !meta ? '' : !isSeries ? meta.name : (() => { const ep = meta.episodes.find(e => e.id === episode); return ep ? `${meta.name} S${ep.season}E${ep.number}` : meta.name; })();
@@ -242,7 +252,7 @@ export function TitlePage({ type, id, embedded, onPlayed }: { type: string; id: 
                 ) : (
                     <section>
                         <div className="row-head"><h2>Streams</h2></div>
-                        <StreamList meta={meta} streamKey={streamKey} isSeries={false} label={label} together={together} onPlayed={played} forRoom={embedded} />
+                        <StreamList meta={meta} streamKey={streamKey} isSeries={false} label={label} together={together} onPlayed={played} forRoom={embedded} startAt={startAt} />
                     </section>
                 )}
 
@@ -262,7 +272,7 @@ export function TitlePage({ type, id, embedded, onPlayed }: { type: string; id: 
                             <button className="btn small ghost" onClick={() => setSheet(false)} aria-label="Close"><IX width={16} height={16} /></button>
                         </header>
                         <div className="sheet-body">
-                            <StreamList key={episode} meta={meta} streamKey={episode} isSeries label={label} together={together} forRoom={embedded} onPlayed={() => { setSheet(false); played(); }} />
+                            <StreamList key={episode} meta={meta} streamKey={episode} isSeries label={label} together={together} forRoom={embedded} startAt={episode === openEpisode ? startAt : 0} onPlayed={() => { setSheet(false); played(); }} />
                         </div>
                     </section>
                 </div>

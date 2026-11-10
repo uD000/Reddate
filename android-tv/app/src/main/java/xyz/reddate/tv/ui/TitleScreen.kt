@@ -152,7 +152,9 @@ fun TitleScreen(model: AppModel, start: Meta, autoPlay: Boolean, episodeId: Stri
     // A second OK press that lands just as the screen opens must not start playing something.
     val openedAt = remember(start.id) { System.currentTimeMillis() }
     fun justOpened() = System.currentTimeMillis() - openedAt < 800
-    fun playNow(s: Stream) = model.playStream(s, label(), meta.type, streamKey ?: meta.id, meta.background.ifEmpty { meta.poster }, if (meta.isSeries) meta.id else "", startAt = startAt)
+    // The resume point belongs to the episode it came with: another episode picked here starts from the top.
+    fun playNow(s: Stream) = model.playStream(s, label(), meta.type, streamKey ?: meta.id, meta.background.ifEmpty { meta.poster }, if (meta.isSeries) meta.id else "",
+        startAt = if (!meta.isSeries || episode?.id == episodeId) startAt else 0)
     fun play(s: Stream) { if (justOpened()) return; playNow(s) }
     val streamBtn = remember { FocusRequester() }
     val jumpScope = androidx.compose.runtime.rememberCoroutineScope()

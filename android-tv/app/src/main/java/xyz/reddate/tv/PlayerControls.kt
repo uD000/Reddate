@@ -2151,6 +2151,22 @@ class PlayerControls(
     private fun renderBrowse() {
         panelTitle.text = "Browse"
         if (!canChange) add(note("Only the host can change what plays. You can look around."))
+        val current = info.optString("current")
+        if (current.isNotEmpty()) {
+            val show = info.optString("show")
+            add(row("Other streams", if (show.isNotEmpty()) "Another source for this episode, from where you are" else "Another source for this movie, from where you are") {
+                if (!canChange) { denyChange(); return@row }
+                // Home opens the title that's playing at its streams; the one picked starts here.
+                val type = info.optString("ctype").ifEmpty { if (show.isNotEmpty()) "series" else "movie" }
+                PlayerActivity.pendingTitle = JSONObject().put("id", show.ifEmpty { current }).put("type", type)
+                    .put("name", info.optString("showName").ifEmpty { info.optString("title") }).toString()
+                PlayerActivity.pendingStreams = true
+                PlayerActivity.pendingStreamsEpisode = if (show.isNotEmpty()) current else ""
+                PlayerActivity.pendingStreamsAt = activity.positionSec()
+                closePanel()
+                activity.changeVideo()
+            }.also { it.tag = "otherstreams" })
+        }
         if ((info.optJSONArray("episodes")?.length() ?: 0) > 0) add(row("This show", "Episodes and seasons") { openPanel("episodes") })
         add(row("Suggested for you", "Trending, from your Home rows") { openPanel("suggest") })
         add(row("Search", "Find another movie or show") { openPanel("search") })

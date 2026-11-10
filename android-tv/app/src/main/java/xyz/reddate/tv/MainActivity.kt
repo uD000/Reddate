@@ -200,8 +200,20 @@ class MainActivity : ComponentActivity() {
             model.loadContinue(); model.refreshVault(); model.refreshInfo()
             val picked = PlayerActivity.pendingTitle
             if (picked != null) {
+                val streams = PlayerActivity.pendingStreams
+                val ep = PlayerActivity.pendingStreamsEpisode; val at = PlayerActivity.pendingStreamsAt
                 PlayerActivity.pendingTitle = null; PlayerActivity.pickingVideo = false
-                try { model.go(xyz.reddate.tv.ui.Screen.Title(xyz.reddate.tv.ui.parseMeta(org.json.JSONObject(picked)), autoPlay = true)); model.say("Pick a stream: it plays for everyone in the party") } catch (_: Exception) { }
+                PlayerActivity.pendingStreams = false; PlayerActivity.pendingStreamsEpisode = ""; PlayerActivity.pendingStreamsAt = 0
+                try {
+                    val meta = xyz.reddate.tv.ui.parseMeta(org.json.JSONObject(picked))
+                    if (streams) {
+                        // "Other streams": the same title at its streams, nothing picked for you; Back goes on to Home.
+                        model.go(xyz.reddate.tv.ui.Screen.Title(meta, episodeId = ep, startAt = at))
+                        model.say("Pick another stream: it continues from where you were, for everyone")
+                    } else {
+                        model.go(xyz.reddate.tv.ui.Screen.Title(meta, autoPlay = true)); model.say("Pick a stream: it plays for everyone in the party")
+                    }
+                } catch (_: Exception) { }
             } else if (PlayerActivity.pickingVideo) { PlayerActivity.pickingVideo = false; model.say("Pick something: it plays for everyone in the party") }
         }
     }
