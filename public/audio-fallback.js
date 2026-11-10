@@ -12,8 +12,6 @@
         const RESUME_SECONDS = 5;
         const cache = new Map(), nodes = new Map(), listeners = [];
         const metadataController = new AbortController();
-        const clientId = Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('');
-        const clientHeaders = { 'X-Reddate-Audio-Client': clientId };
 
         const changed = () => { if (!disposed) onChange(); };
         const defaultTrack = () => session && (session.tracks.find(t => t.isDefault) || session.tracks[0]);
@@ -61,26 +59,25 @@
                 }
             }
         }
-        async function load(expiredToken = null) {
-            if (session && (!expiredToken || session.token !== expiredToken)) return session;
+        async function load() {
+            if (session) return session;
             if (loading) return loading;
-            const previous = session;
-            status = previous ? 'Reconnecting selected audio…' : 'Finding embedded audio languages…';
+            status = 'Finding embedded audio languages…';
             changed();
             loading = (async () => {
                 try {
                     const response = await fetch('/api/audio/tracks', {
-                        method: 'POST', headers: { ...clientHeaders, 'Content-Type': 'application/json' },
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ url }), signal: metadataController.signal
                     });
                     const data = await response.json();
                     if (!response.ok) throw new Error(data.error || 'Could not read this video’s audio tracks.');
                     if (disposed) {
-                        fetch(`/api/audio/${data.token}`, { method: 'DELETE', headers: clientHeaders, keepalive: true }).catch(() => {});
+                        fetch(`/api/audio/${data.token}`, { method: 'DELETE', keepalive: true }).catch(() => {});
                         return null;
                     }
                     session = data;
-                    if (!previous) selected = defaultTrack().index;
+                    selected = defaultTrack().index;
                     status = '';
                     changed();
                     return session;
@@ -98,17 +95,7 @@
             const entry = { track, start, controller, buffer: null, promise: null };
             cache.set(key, entry);
             entry.promise = (async () => {
-                let response;
-                for (let attempt = 0; attempt < 2; attempt++) {
-                    const token = session.token;
-                    response = await fetch(`/api/audio/${token}/${track}/${start}`, { headers: clientHeaders, signal: controller.signal });
-                    if (response.status !== 404 || attempt) break;
-                    // Render restarts and long pauses can discard the temporary session.
-                    // Renew it once without dropping the chosen language or decoded audio.
-                    if (!await load(token)) throw new Error(status || 'Could not reconnect the selected audio.');
-                    if (disposed || controller.signal.aborted) throw new DOMException('Cancelled', 'AbortError');
-                    if (!session.tracks.some(t => t.index === track)) throw new Error('The selected audio track is no longer available.');
-                }
+                const response = await fetch(`/api/audio/${session.token}/${track}/${start}`, { signal: controller.signal });
                 if (!response.ok) {
                     const error = await response.json().catch(() => ({}));
                     throw new Error(error.error || 'Could not load the selected audio.');
@@ -271,11 +258,6 @@
         const timer = setInterval(tick, 150);
         return {
             load, select, prepare,
-            setMuted(value) {
-                muted = originalMuted = !!value;
-                video.muted = active ? true : muted;
-                syncVolume();
-            },
             get tracks() { return session?.tracks || []; },
             get selected() { return selected; },
             get active() { return active; },
@@ -293,7 +275,7 @@
                 restoreOriginal();
                 clearChunks();
                 if (gain) gain.disconnect();
-                if (session) fetch(`/api/audio/${session.token}`, { method: 'DELETE', headers: clientHeaders, keepalive: true }).catch(() => {});
+                if (session) fetch(`/api/audio/${session.token}`, { method: 'DELETE', keepalive: true }).catch(() => {});
             }
         };
     };

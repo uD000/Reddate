@@ -1,6 +1,7 @@
-/* Shared subtitles and per-viewer audio-track switching for the direct-video player.
+/* Per-viewer subtitles and audio-track switching for the direct-video player.
  *
- * Subtitle files, Off and timing changes are shared with the room. Audio stays personal.
+ * Both are personal choices, so nothing here is synced to the room: each viewer
+ * picks their own subtitle language / audio track.
  *
  * Subtitles come from Stremio subtitle addons (built-in OpenSubtitles v3 plus
  * any the room added, via window.reddateAddons) or a local .srt/.vtt file.
@@ -40,61 +41,6 @@ window.tracks = (function () {
     let panelOpener = null;
     let fallback = null;
     let audioSelectionId = 0;
-    let subtitleSelectionId = 0;
-    let mediaId = null;
-    let sharedSubtitle = null;
-    let currentVtt = null;
-    let onSubtitleChange = null;
-    let onAudioChange = null;
-    let settingsOwner = false;
-    let subtitlePersonal = false;
-    let audioPersonal = false;
-    let roomAudio = null;
-    let reportedAudio = '';
-    let audioMediaId = null;
-    let attachedSource = '';
-
-    function reportAudio(force = false) {
-        if (force) reportedAudio = '';
-        if (!settingsOwner || !mediaId || audioMediaId !== mediaId || !onAudioChange || pendingAudio || fallback?.pending) return;
-        const opts = audioOptions();
-        const index = opts.findIndex(o => o.enabled);
-        if (index < 0) return;
-        const state = { language: opts[index].language || '', label: opts[index].label || '', index };
-        const signature = JSON.stringify(state);
-        if (signature === reportedAudio) return;
-        reportedAudio = signature;
-        onAudioChange({ mediaId, state });
-    }
-
-    function applyRoomAudio(state) {
-        if (!state || typeof state.language !== 'string') return;
-        roomAudio = state;
-        refreshAudioOptions();
-    }
-    const MAX_SUB_BYTES = 5 * 1024 * 1024;
-
-    function publishSubtitle() {
-        const state = { vtt: currentVtt, key: activeSubUrl, lang: activeLang, label: activeLabel, offset };
-        sharedSubtitle = state;
-        subtitlePersonal = !settingsOwner;
-        if (onSubtitleChange && mediaId && settingsOwner) onSubtitleChange({ mediaId, state });
-    }
-
-    function applySharedSubtitle(state, preserveSelection = false, force = false) {
-        if (subtitlePersonal && !settingsOwner && !force) return;
-        if (!state || (state.vtt !== null && typeof state.vtt !== 'string')) return;
-        if (state.vtt && new TextEncoder().encode(state.vtt).length > MAX_SUB_BYTES) return;
-        if (!preserveSelection) subtitleSelectionId++;
-        sharedSubtitle = state;
-        if (!video) return;
-        if (state.vtt) attachVtt(state.vtt, String(state.key || 'shared'), String(state.lang || 'und'), String(state.label || 'Room subtitle'));
-        else clearSubtitle();
-        offset = Number.isFinite(state.offset) ? Math.max(-600, Math.min(600, state.offset)) : 0;
-        shiftCues();
-        setPanelStatus('');
-        renderPanel();
-    }
 
     const $ = id => document.getElementById(id);
     const modal = () => $('trackModal');
@@ -178,7 +124,6 @@ window.tracks = (function () {
         activeLang = 'off';
         activeLabel = '';
         offset = 0;
-        currentVtt = null;
     }
 
     function shiftCues() {
@@ -194,7 +139,6 @@ window.tracks = (function () {
     function attachVtt(vtt, key, lang, label) {
         if (!video) return;
         clearSubtitle();
-        currentVtt = vtt;
         blobUrl = URL.createObjectURL(new Blob([vtt], { type: 'text/vtt' }));
         trackEl = document.createElement('track');
         trackEl.kind = 'subtitles';
@@ -212,22 +156,15 @@ window.tracks = (function () {
 
     async function applySubtitle(sub) {
         if (!video) return;
-        subtitlePersonal = !settingsOwner;
-        const selection = ++subtitleSelectionId;
-        const forVideo = video;
         setPanelStatus('Loading subtitle…');
         try {
             const res = await fetch(sub.url);
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const vtt = toVtt(decodeText(await res.arrayBuffer()));
-            if (selection !== subtitleSelectionId || video !== forVideo) return;
-            if (new TextEncoder().encode(vtt).length > MAX_SUB_BYTES) throw new Error('max 5 MB');
             attachVtt(vtt, sub.url, sub.lang, langName(sub.lang));
             setPref(sub.lang);
-            publishSubtitle();
             setPanelStatus('');
         } catch (e) {
-            if (selection !== subtitleSelectionId || video !== forVideo) return;
             setPanelStatus(`Couldn't load that subtitle (${e.message}). Try another one.`);
         }
         renderPanel();
@@ -235,17 +172,10 @@ window.tracks = (function () {
 
     function loadSubtitleFile(file) {
         if (!file || !video) return;
-        subtitlePersonal = !settingsOwner;
         if (file.size > 5 * 1024 * 1024) { toast('Subtitle file too large (max 5 MB)'); return; }
         const reader = new FileReader();
-        const selection = ++subtitleSelectionId;
-        const forVideo = video;
         reader.onload = () => {
-            if (selection !== subtitleSelectionId || video !== forVideo) return;
-            const vtt = toVtt(decodeText(reader.result));
-            if (new TextEncoder().encode(vtt).length > MAX_SUB_BYTES) { toast('Subtitle file too large (max 5 MB)'); return; }
-            attachVtt(vtt, `file:${file.name}`, 'und', file.name);
-            publishSubtitle();
+            attachVtt(toVtt(decodeText(reader.result)), `file:${file.name}`, 'und', file.name);
             renderPanel();
         };
         reader.readAsArrayBuffer(file);
@@ -261,6 +191,17 @@ window.tracks = (function () {
                 .catch(() => { subsPromise = null; return []; });
         }
         return subsPromise;
+    }
+
+    // Turn subtitles on automatically in the language this viewer last picked.
+    async function autoApplyPreferred() {
+        const pref = getPref();
+        if (pref === 'off' || !content) return;
+        const forVideo = video;
+        const list = await ensureSubs();
+        if (forVideo !== video || activeSubUrl) return;
+        const best = list.find(s => s.lang === pref);
+        if (best) applySubtitle(best);
     }
 
     // ---------- audio tracks ----------
@@ -318,7 +259,6 @@ window.tracks = (function () {
     }
 
     async function selectAudio(index, remember = true) {
-        if (remember) audioPersonal = true;
         const opt = audioOptions()[index];
         if (!opt) return;
         const selectionId = ++audioSelectionId;
@@ -346,26 +286,12 @@ window.tracks = (function () {
             pendingAudio = null;
             audioStatus = 'Could not switch audio. Try another language or stream.';
         }
-        reportAudio();
         renderPanel();
     }
 
     function refreshAudioOptions() {
-        // New viewers inherit the room selection before their saved language.
-        if (roomAudio && !audioPersonal && !pendingAudio && !(fallback && (fallback.pending || !fallback.canAutoSelect))) {
-            const opts = audioOptions();
-            const language = audioLanguage(roomAudio.language);
-            let index = opts.findIndex(o => o.language === language && o.label === roomAudio.label);
-            if (index < 0 && language) index = opts.findIndex(o => o.language === language);
-            if (index < 0 && language) index = opts.findIndex(o => o.language && o.language.split('-')[0] === language.split('-')[0]);
-            if (index < 0 && !language && Number.isInteger(roomAudio.index) && opts[roomAudio.index]) index = roomAudio.index;
-            if (index >= 0) {
-                audioSelected = true;
-                if (!opts[index].enabled) selectAudio(index, false);
-            }
-        }
         // Track lists may arrive after loadedmetadata, or change with an HLS group.
-        if ((!roomAudio || audioPersonal) && !audioSelected && !pendingAudio && !(fallback && (fallback.pending || !fallback.canAutoSelect))) {
+        if (!audioSelected && !pendingAudio && !(fallback && (fallback.pending || !fallback.canAutoSelect))) {
             let pref = '';
             try { pref = audioLanguage(localStorage.getItem(AUDIO_PREF_KEY)); } catch (_) {}
             if (pref) {
@@ -375,7 +301,6 @@ window.tracks = (function () {
                 if (index >= 0 && !opts[index].enabled) selectAudio(index, false);
             }
         }
-        reportAudio();
         renderPanel();
     }
 
@@ -517,7 +442,6 @@ window.tracks = (function () {
         const title = el('h2', null, 'Subtitles');
         title.id = 'trackModalTitle';
         b.appendChild(title);
-        b.appendChild(el('div', 'addon-help', 'Start with the room subtitles. Your personal changes take priority.'));
 
         // What's showing right now.
         const now = el('div', `sub-now ${activeSubUrl ? 'on' : ''}`);
@@ -536,7 +460,7 @@ window.tracks = (function () {
 
         const bar = el('div', 'browse-bar');
         const off = el('button', `tab-btn ${activeSubUrl ? '' : 'active'}`, 'Off');
-        off.onclick = () => { subtitleSelectionId++; clearSubtitle(); setPref('off'); publishSubtitle(); renderPanel(); };
+        off.onclick = () => { clearSubtitle(); setPref('off'); renderPanel(); };
         bar.appendChild(off);
         if (langs.size) {
             const sel = el('select', 'browse-select');
@@ -578,8 +502,8 @@ window.tracks = (function () {
             plus.setAttribute('aria-label', `Show subtitles ${OFFSET_STEP}s later`);
             const val = el('span', 'sub-offset mono', `${offset > 0 ? '+' : ''}${offset.toFixed(1)}s`);
             val.setAttribute('aria-live', 'polite');
-            minus.onclick = () => { offset = Math.max(-600, offset - OFFSET_STEP); shiftCues(); publishSubtitle(); renderPanel(); };
-            plus.onclick = () => { offset = Math.min(600, offset + OFFSET_STEP); shiftCues(); publishSubtitle(); renderPanel(); };
+            minus.onclick = () => { offset -= OFFSET_STEP; shiftCues(); renderPanel(); };
+            plus.onclick = () => { offset += OFFSET_STEP; shiftCues(); renderPanel(); };
             stepper.append(minus, val, plus);
             timing.append(stepper, el('span', 'addon-help', 'Subtitles too early? Press +. Too late? Press −.'));
             b.appendChild(timing);
@@ -622,38 +546,10 @@ window.tracks = (function () {
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire); else wire();
 
     return {
-        configureRoom(onChange, onAudio) { onSubtitleChange = onChange; onAudioChange = onAudio; },
-        setSettingsOwner(owns) {
-            const becameOwner = !!owns && !settingsOwner;
-            settingsOwner = !!owns;
-            if (becameOwner && subtitlePersonal && sharedSubtitle && onSubtitleChange) {
-                subtitlePersonal = false;
-                onSubtitleChange({ mediaId, state: sharedSubtitle });
-            }
-            reportAudio();
-        },
-        applyRoomAudio,
-        reportAudio,
-        makeSubtitlePersonal() { subtitlePersonal = !settingsOwner; },
-        setMedia(id, source) {
-            if (id === mediaId) return;
-            mediaId = id;
-            audioMediaId = video && source && source === attachedSource ? id : null;
-            subtitlePersonal = false;
-            audioPersonal = false;
-            roomAudio = null;
-            reportedAudio = '';
-            subtitleSelectionId++;
-            sharedSubtitle = null;
-            clearSubtitle();
-        },
-        applyShared: applySharedSubtitle,
         // A new <video> was created for a direct stream.
         attach(v, src) {
             clearAudioListeners();
             video = v;
-            attachedSource = src || '';
-            audioMediaId = mediaId;
             playerKind = 'direct';
             hls = null;
             trackEl = null;
@@ -671,13 +567,12 @@ window.tracks = (function () {
             }
             if (v.audioTracks && v.audioTracks.addEventListener) {
                 ['addtrack', 'removetrack'].forEach(ev => listen(v.audioTracks, ev, refreshAudioOptions));
-                listen(v.audioTracks, 'change', refreshAudioOptions);
+                listen(v.audioTracks, 'change', renderPanel);
             }
             listen(v, 'loadedmetadata', refreshAudioOptions);
             if (fallback) listen(v, 'loadedmetadata', () => fallback?.load());
             listen(v, 'error', renderPanel);
             refreshAudioOptions();
-            if (sharedSubtitle) applySharedSubtitle(sharedSubtitle, true, true);
         },
         attachHls(h) {
             hls = h;
@@ -693,7 +588,6 @@ window.tracks = (function () {
                         audioStatus = `Selected ${pendingAudio.label}.`;
                         pendingAudio = null;
                     }
-                    reportAudio();
                     renderPanel();
                 });
                 on(window.Hls.Events.ERROR, (_event, data) => {
@@ -719,14 +613,12 @@ window.tracks = (function () {
             subs = null;
             subsPromise = null;
             browsingLang = null;
+            autoApplyPreferred();
         },
         detach() {
-            subtitleSelectionId++;
             clearAudioListeners();
             if (blobUrl) URL.revokeObjectURL(blobUrl);
             video = null;
-            audioMediaId = null;
-            attachedSource = '';
             hls = null;
             playerKind = null;
             trackEl = null;

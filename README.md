@@ -15,21 +15,13 @@ anywhere** can spin up a room and share the link. Styled after Reddit
 
 ## Features
 
-- **Automatic room codes and invite links** — creating a room generates a unique
-  five-character code, such as `A7B2C`. The code appears above the video with a
-  **Copy room code** button. Friends can join with the code or an invite link;
-  codes are case-insensitive.
-- **Shared browser and Android TV rooms** — new parties created through
-  `reddate.xyz` use the TV service, allowing browsers and Android TVs to watch
-  and chat in the same room. Existing encrypted browser invite links continue
-  to use the original browser server.
 - 🎬 **Synced video playback** — YouTube links *and* direct video URLs (`.mp4`,
   `.webm`, `.ogg`, …). Play, pause, seek and load together; late joiners and
   drifters auto-catch-up. Playback commands that arrive before a viewer's player
   is ready are buffered and applied on load, so nobody has to "press play first".
-- 🔒 **End-to-end encrypted chat on the standalone browser server** — messages
-  use AES-GCM with a 256-bit key. The server relays encrypted messages and key
-  transfers without receiving the unencrypted room key.
+- 🔒 **End-to-end encrypted chat** — messages are encrypted in the browser with
+  AES-GCM 256. The room key lives only in the invite link (after the `#`) and
+  never touches the server, which relays opaque ciphertext only.
 - 🎙️ **Lounge** — Discord-style: anyone in the room can hop in or out, up
   to 8 people, mic on and camera optional, with a speaking indicator.
   Peer-to-peer over WebRTC (a mesh), end-to-end encrypted by DTLS-SRTP;
@@ -43,9 +35,6 @@ anywhere** can spin up a room and share the link. Styled after Reddit
 - ⬆️⬇️ **Reddit-style UI** — subreddit-style header, OP tag, cosmetic upvote/downvote,
   and a "Comment" send button.
 - 🔗 **Shareable invite links** — create a room, copy the link, send it to anyone.
-- **Refresh without rejoining manually** — this tab remembers your name and room.
-  Refresh returns to the player automatically. The server keeps an empty room for
-  two minutes after a dropped connection so a refresh can recover its video state.
 - 👥 **Multi-participant rooms** — share the link with as many people as you like
   (voice holds up to 8; chat and video sync have no limit).
 - 🍿 **Browse movies & shows with Stremio/Nuvio addons** — paste any
@@ -97,22 +86,17 @@ How it fits together:
 
 ### Subtitles & audio tracks
 
-New viewers start with the room's current audio and subtitle settings. Each viewer
-can then change audio, turn subtitles off, or adjust subtitle timing for their own device.
-The person who loaded the video supplies the room's starting settings.
+Both are **per viewer** — each person picks their own; nothing is synced.
 
 - **💬 Subtitles** — for titles picked from Browse, subtitles come from the
   built-in OpenSubtitles v3 addon plus any room addon that offers subtitles.
   Pick a language and a file (ones matching the stream's release are ranked
   first, early CAM/TS rips last), nudge timing ±0.5s if they drift, or load
-  your own `.srt`/`.vtt` file (up to 5 MB) for any video. Selecting a subtitle,
-  turning it off, or changing its timing updates your player. The room controller's
-  choices also apply to viewers who have not made a personal choice and to people
-  who join later. Subtitle data is encrypted with the room key and held in memory
-  until the video changes or the room closes. Your last language helps sort the picker.
+  your own `.srt`/`.vtt` file for any video. Your language is remembered and
+  applied automatically to the next title.
 - **🔊 Language** — open the Language button below the video, or the audio
   icon in full-screen mode, to switch audio while watching (e.g. Hindi / English).
-  Guests' choices apply only to their own device, keep the playback position, and are remembered
+  Your choice applies only to you, keeps the playback position, and is remembered
   for the next video when that language is available. The list updates as tracks
   load. Switching requires audio tracks supplied by the source. Native and HLS
   players switch tracks directly. For embedded tracks in MP4/MKV files that the
@@ -150,7 +134,7 @@ The person who loaded the video supplies the room's starting settings.
 
 ## How the privacy model works
 
-When `main` runs on its own, browser rooms use shared-key end-to-end encryption:
+Reddate uses a shared-key end-to-end encryption scheme:
 
 1. When you create a room, the browser generates a random room ID and a 256-bit
    AES-GCM key.
@@ -161,19 +145,9 @@ When `main` runs on its own, browser rooms use shared-key end-to-end encryption:
 4. Trigger-word reactions are detected locally on decrypted text, so no
    plaintext ever leaves your browser.
 
-Someone joining with a room code receives the encryption key from a connected
-room member through a temporary ECDH/AES-GCM key exchange. The server relays
-public keys and the encrypted key transfer. This flow relies on the server for
-code lookup and participant discovery; full encrypted invite links remain
-available.
-
-Rooms hosted by the shared TV service follow the `tv` branch's privacy model.
-Their chat is relayed without end-to-end encryption. The encryption details
-below apply to rooms hosted by the standalone `main` server.
-
 > **Note:** anyone with the invite link can read the room, so treat the link
-> like a password. Room codes also allow people to join while a room member is
-> connected. Chat history is never persisted.
+> like a password. This protects against a curious/compromised server, not
+> against someone you shared the link with. Chat history is never persisted.
 
 ### What is and isn't private
 
@@ -206,35 +180,14 @@ npm start          # or: npm run dev  (auto-reload with nodemon)
 ```
 
 Then open http://localhost:3000, enter a display name, and click
-**Create a room**. Use **Copy room code** above the video or **Copy invite** in
-the header to invite friends. Paste a YouTube or direct
+**Create a room**. Copy the invite link and share it. Paste a YouTube or direct
 video URL to start watching, and hit **📹 Start Call** for a 1:1 video chat.
 
 Set a custom port with `PORT=8080 npm start`.
 
-### Shared browser and Android TV rooms
-
-To let browsers and Android TVs join the same party, route them to the same
-`tv` server process. Each server keeps its rooms in memory, so separate
-processes do not share room codes or playback state.
-
-For local development, start the `tv` server on a port such as `3090`, then set
-this variable in the `main` server's `.env` file and restart it:
-
-```dotenv
-SHARED_PARTY_URL=http://localhost:3090
-```
-
-For production, either serve both domains from the TV service or keep `main`
-serving the browser lobby and set `SHARED_PARTY_URL` to the TV service's URL.
-The `reddate.xyz` lobby defaults to `https://tv.reddate.xyz` when the variable
-is unset. New parties use that shared service; existing encrypted browser
-invite links continue to use the `main` server.
-
 Optional environment variables (locally, put them in a `.env` file next to
 `server.js` — it's git-ignored; see `.env.example`):
 
-- `SHARED_PARTY_URL` — the TV service's URL for shared browser and Android TV rooms.
 - `SUPPORT_URL` — optional; shows a "Buy me a coffee" link (https only).
 - `GIPHY_API_KEY` — turns on the GIF picker. Get a free key at
   [developers.giphy.com](https://developers.giphy.com/) → *Create an App* → *API*.
@@ -254,7 +207,7 @@ views/stats.html   # The private stats page (served only after the password chec
 public/index.html  # Markup + styles (lobby + app shell)
 public/app.js      # Client logic: E2E crypto, chat, video sync (YouTube + direct links + HLS), polls
 public/addons.js   # Stremio-compatible addons: catalogs, search, episodes, stream picker
-public/tracks.js   # Shared subtitles (addon + local files) and per-viewer audio switching
+public/tracks.js   # Per-viewer subtitles (addon + local files) and audio-track switching
 public/audio-fallback.js # Keeps extracted audio aligned with the original video
 public/playback-gate.js # Coordinates local audio buffering without pausing the room
 media-audio.js     # Optional FFmpeg audio extraction, in-memory sessions and bounded chunks

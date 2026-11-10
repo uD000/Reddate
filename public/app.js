@@ -32,7 +32,7 @@ async function exportKey(key) {
     return bytesToB64url(new Uint8Array(raw));
 }
 async function importKey(b64) {
-    return crypto.subtle.importKey('raw', b64urlToBytes(b64), { name: 'AES-GCM' }, true, ['encrypt', 'decrypt']);
+    return crypto.subtle.importKey('raw', b64urlToBytes(b64), { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
 }
 async function encryptText(key, text) {
     const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -60,8 +60,6 @@ function parseFragment() {
 let socket = null;
 let roomKey = null;      // CryptoKey
 let roomId = null;
-let roomCode = '';
-let roomJoined = false;
 let currentUser = 'Guest';
 
 let vp = null;              // unified player adapter (YouTube or HTML5 <video>)
@@ -70,12 +68,6 @@ let isPlayerReady = false;
 let isVideoPlaying = false;
 let ignoreNextStateChange = false;
 let pendingState = null;    // play/pause/seek to apply once the player is ready
-let roomPlayback = null;
-let autoplayBlocked = false;
-let currentMediaId = null;
-let subtitleRevision = 0;
-let audioRevision = 0;
-let settingsOwnerId = null;
 let typingTimer = null;
 
 // Generic trigger words -> reaction emoji. Detected client-side on decrypted
@@ -125,133 +117,37 @@ const appEl = document.getElementById('app');
 const usernameInput = document.getElementById('usernameInput');
 const lobbyBtn = document.getElementById('lobbyBtn');
 const lobbyTagline = document.getElementById('lobbyTagline');
-const lobbyTitle = document.getElementById('lobbyTitle');
-const lobbyError = document.getElementById('lobbyError');
-const createHint = document.getElementById('createHint');
-const joinInput = document.getElementById('joinInput');
-const joinBtn = document.getElementById('joinBtn');
 
 const existing = parseFragment();
 const isJoining = !!(existing.roomId && existing.keyB64);
 
 if (isJoining) {
     lobbyBtn.textContent = 'Join room';
-    lobbyTitle.textContent = 'Join your friends.';
     lobbyTagline.textContent = 'You\'ve been invited to a room. Pick a name and jump in.';
-    createHint.hidden = true;
 }
 
-usernameInput.value = window.reddateBrowserSession.savedName();
 usernameInput.focus();
-usernameInput.addEventListener('keydown', e => {
-    if (e.key === 'Enter') {
-        e.preventDefault();
-        (joinInput.value.trim() && !isJoining ? joinBtn : lobbyBtn).click();
-    }
-});
+usernameInput.addEventListener('keydown', e => { if (e.key === 'Enter') lobbyBtn.click(); });
 
-const pathInvite = partyCode.parse(location.pathname + location.hash);
-const partyConfig = fetch('/party-config').then(r => r.json()).catch(() => ({ origin: '' }));
-partyConfig.then(config => {
-    if (config.origin && !isJoining && !pathInvite) lobbyTagline.textContent = 'Create a room and watch together on phones, browsers, and Android TVs.';
-});
-if (isJoining) document.getElementById('roomOptions').hidden = true;
-
-function clearLobbyError() {
-    lobbyError.hidden = true;
-    lobbyError.textContent = '';
-    usernameInput.removeAttribute('aria-invalid');
-    joinInput.removeAttribute('aria-invalid');
-}
-function showLobbyError(message, input) {
-    lobbyError.textContent = message;
-    lobbyError.hidden = false;
-    if (input) { input.setAttribute('aria-invalid', 'true'); input.focus(); }
-}
-usernameInput.addEventListener('input', clearLobbyError);
-joinInput.addEventListener('input', clearLobbyError);
-
-async function inviteSocket() {
-    if (!socket) socket = io();
-    if (socket.connected) return socket;
-    await new Promise((resolve, reject) => {
-        const cleanup = () => { clearTimeout(timer); socket.off('connect', ready); socket.off('connect_error', failed); };
-        const ready = () => { cleanup(); resolve(); };
-        const failed = () => { cleanup(); reject(new Error('Could not connect. Try again.')); };
-        const timer = setTimeout(failed, 8000);
-        socket.once('connect', ready); socket.once('connect_error', failed);
-    });
-    return socket;
-}
-function resolveCode(code) {
-    return new Promise((resolve, reject) => {
-        socket.timeout(8000).emit('resolve-room', { code }, (error, result) => {
-            if (error) reject(new Error('Could not check that code. Try again.'));
-            else if (!result?.ok) reject(new Error(result?.message || 'That party has ended.'));
-            else resolve(result);
-        });
-    });
-}
-async function enterFromLobby(joining) {
-    if (lobbyBtn.disabled || joinBtn.disabled) return;
-    clearLobbyError();
+lobbyBtn.addEventListener('click', async () => {
     const name = usernameInput.value.trim();
-    if (!name) { showLobbyError('Enter your name to create or join a room.', usernameInput); return; }
-    const invite = joining ? partyCode.parse(joinInput.value) : null;
-    if (joining && !invite) { showLobbyError('Enter a 5-character room code or a valid invite link.', joinInput); return; }
+    if (!name) { usernameInput.focus(); return; }
     currentUser = name;
-    const actionBtn = joining && !isJoining ? joinBtn : lobbyBtn;
-    const actionLabel = actionBtn.textContent;
-    actionBtn.textContent = joining || isJoining ? 'Joining…' : 'Creating…';
-    lobbyBtn.disabled = joinBtn.disabled = true;
-    lobbyEl.setAttribute('aria-busy', 'true');
-    try {
-        const config = await partyConfig;
-        // Both public websites create and join on the TV service. Existing
-        // encrypted links continue to use this site's original relay.
-        if (config.origin && !isJoining && !invite?.key) {
-            const path = joining ? `/join/${encodeURIComponent(invite.code)}` : `/classic?create=1&name=${encodeURIComponent(name)}`;
-            location.assign(config.origin + path);
-            return;
-        }
-        await inviteSocket();
-        if (isJoining || invite?.key) {
-            roomId = invite?.code || existing.roomId;
-            roomKey = await importKey(invite?.key || existing.keyB64);
-        } else if (joining) {
-            const found = await resolveCode(invite.code);
-            roomId = found.roomId;
-            roomCode = found.code;
-            roomKey = await roomKeys.request(socket, roomId);
-        } else {
-            roomId = randomRoomId();
-            roomKey = await generateRoomKey();
-            const result = await new Promise((resolve, reject) => socket.timeout(8000).emit('join-room', { roomId, username: currentUser, resumeId: window.reddateBrowserSession.clientId() }, (error, data) => error ? reject(new Error('Could not create the room. Try again.')) : resolve(data)));
-            if (!result?.ok) throw new Error(result?.message || 'Could not create the room.');
-            roomCode = result.code;
-        }
-        history.replaceState(null, '', `/#room=${encodeURIComponent(roomId)}&k=${await exportKey(roomKey)}`);
-        startApp();
-    } catch (error) {
-        showLobbyError(error.message || 'Could not join the room. Try again.');
-    } finally {
-        actionBtn.textContent = actionLabel;
-        lobbyBtn.disabled = joinBtn.disabled = false;
-        lobbyEl.removeAttribute('aria-busy');
+    lobbyBtn.disabled = true;
+
+    if (isJoining) {
+        roomId = existing.roomId;
+        roomKey = await importKey(existing.keyB64);
+    } else {
+        roomId = randomRoomId();
+        const key = await generateRoomKey();
+        roomKey = key;
+        const keyB64 = await exportKey(key);
+        location.hash = `room=${encodeURIComponent(roomId)}&k=${keyB64}`;
     }
-}
-lobbyBtn.addEventListener('click', () => enterFromLobby(!!pathInvite && !isJoining));
-joinBtn.addEventListener('click', () => enterFromLobby(true));
-joinInput.addEventListener('keydown', e => {
-    if (e.key === 'Enter') { e.preventDefault(); joinBtn.click(); }
+
+    startApp();
 });
-if (!isJoining && pathInvite) {
-    joinInput.value = pathInvite.code;
-    document.querySelector('.lobby-create').hidden = true;
-    document.querySelector('.lobby-divider').hidden = true;
-    lobbyTitle.textContent = 'Join your friends.';
-    lobbyTagline.textContent = 'You’ve been invited to a room. Enter your name and join.';
-}
 
 function showToast(msg) {
     const t = document.getElementById('toast');
@@ -287,31 +183,19 @@ function startApp() {
     lobbyEl.classList.add('hidden');
     appEl.classList.remove('hidden');
 
-    socket = socket || io();
-    roomKeys.serve(socket, () => roomId, () => roomKey);
+    socket = io();
 
-    const markConnected = () => {
+    socket.on('connect', () => {
         document.getElementById('connectionStatus').classList.remove('disconnected');
         document.getElementById('connectionText').textContent = 'Connected';
-    };
-    socket.on('connect', () => {
-        markConnected();
-        socket.emit('join-room', { roomId, username: currentUser, resumeId: window.reddateBrowserSession.clientId() });
+        socket.emit('join-room', { roomId, username: currentUser });
     });
     socket.on('disconnect', () => {
-        roomJoined = false;
         document.getElementById('connectionStatus').classList.add('disconnected');
         document.getElementById('connectionText').textContent = 'Disconnected';
     });
 
-    socket.on('joined', data => {
-        roomJoined = true;
-        window.reddateBrowserSession.save({ roomId, roomCode: data.code, name: currentUser });
-        window.tracks?.reportAudio(true);
-        roomCode = data.code || roomCode;
-        updateRoomShare();
-        addSystemMessage('🔒 Connected securely. Share the room code or invite link to bring someone in.');
-    });
+    socket.on('joined', () => addSystemMessage('🔒 Connected securely. Share the invite link to bring someone in.'));
     socket.on('user-count', c => {
         userCount = c;
         document.getElementById('userCount').textContent = `${c} online`;
@@ -356,14 +240,8 @@ function startApp() {
         roomId,
         encrypt: obj => encryptText(roomKey, JSON.stringify(obj)),
         decrypt: async payload => JSON.parse(await decryptText(roomKey, payload)),
-        toast: showToast,
-        loadVideo: requestVideoLoad
+        toast: showToast
     });
-    // Register every replay listener before requesting the room snapshot.
-    if (socket.connected) {
-        markConnected();
-        socket.emit('join-room', { roomId, username: currentUser, resumeId: window.reddateBrowserSession.clientId() });
-    }
 }
 
 // ---------------- Chat ----------------
@@ -601,50 +479,17 @@ function triggerRain(emoji) {
 // A room can play a YouTube video OR a direct video-file URL (.mp4/.webm/…).
 // Both are wrapped in a small adapter (`vp`) with a common play/pause/seek API
 // so the sync logic below doesn't care which kind is loaded.
-let playerGeneration = 0;
-let playerFailed = false;
-let youtubeApiPromise = null;
-function loadYouTubeApi() {
-    if (window.YT?.Player) return Promise.resolve(window.YT);
-    if (youtubeApiPromise) return youtubeApiPromise;
-    youtubeApiPromise = new Promise((resolve, reject) => {
-        const script = document.createElement('script');
-        const previous = window.onYouTubeIframeAPIReady;
-        const cleanup = () => {
-            clearTimeout(timer);
-            if (window.onYouTubeIframeAPIReady === ready) window.onYouTubeIframeAPIReady = previous;
-            script.onerror = null;
-        };
-        const failed = () => {
-            cleanup(); script.remove(); youtubeApiPromise = null;
-            reject(new Error('Could not reach YouTube. Check your connection and try again.'));
-        };
-        const ready = () => {
-            if (!window.YT?.Player) { failed(); return; }
-            cleanup();
-            try { if (previous) previous(); } catch (_) { /* another listener must not block this player */ }
-            resolve(window.YT);
-        };
-        const timer = setTimeout(failed, 15000);
-        window.onYouTubeIframeAPIReady = ready;
-        script.src = 'https://www.youtube.com/iframe_api';
-        script.async = true;
-        script.onerror = failed;
-        document.head.appendChild(script);
-    });
-    return youtubeApiPromise;
-}
+let ytApiReady = false;
+function onYouTubeIframeAPIReady() { ytApiReady = true; }
+window.onYouTubeIframeAPIReady = onYouTubeIframeAPIReady;
 
 function stageEl() { return document.getElementById('videoPlayer'); }
 function consumeIgnore() { const i = ignoreNextStateChange; ignoreNextStateChange = false; return i; }
 
 function destroyPlayer() {
-    playerGeneration++;
-    playerFailed = false;
     if (vp && vp.destroy) { try { vp.destroy(); } catch (_) {} }
     vp = null;
     isPlayerReady = false;
-    autoplayBlocked = false;
     stageEl().innerHTML = '';
     setPlayerStatus('');
     if (window.tracks) window.tracks.detach(); // subtitles / audio tracks (tracks.js)
@@ -653,19 +498,9 @@ function destroyPlayer() {
 function setPlayerStatus(text) { document.getElementById('playerStatus').textContent = text; }
 
 function onLocalPlayPause(playing) {
-    autoplayBlocked = false;
     isVideoPlaying = playing;
     updatePlayPauseButton();
     socket.emit('video-playpause', { isPlaying: playing, currentTime: vp ? vp.getCurrentTime() : 0 });
-}
-
-function playbackState(data) {
-    roomPlayback = { isPlaying: !!data.isPlaying, currentTime: Math.max(0, Number(data.currentTime) || 0), receivedAt: Date.now() };
-    return roomPlayback;
-}
-
-function playbackPosition(s) {
-    return s.currentTime + (s.isPlaying ? Math.max(0, Date.now() - s.receivedAt) / 1000 : 0);
 }
 
 function applyPending() {
@@ -673,75 +508,51 @@ function applyPending() {
     const s = pendingState;
     pendingState = null;
     ignoreNextStateChange = true;
-    vp.seekTo(playbackPosition(s));
+    if (s.currentTime) vp.seekTo(s.currentTime);
     s.isPlaying ? vp.play() : vp.pause();
     isVideoPlaying = s.isPlaying;
     updatePlayPauseButton();
 }
 
 function createYouTubePlayer(videoId) {
+    if (!window.YT || !YT.Player) { setTimeout(() => createYouTubePlayer(videoId), 300); return; }
     destroyPlayer();
+    if (window.tracks) window.tracks.attachYouTube();
     currentSrc = videoId;
-    const generation = playerGeneration;
-    setPlayerStatus('Loading YouTube…');
-    return loadYouTubeApi().then(YT => {
-        if (generation !== playerGeneration) return;
-        if (window.tracks) window.tracks.attachYouTube();
-        const mount = document.createElement('div');
-        stageEl().appendChild(mount);
-        const yt = new YT.Player(mount, {
-            height: '100%', width: '100%', videoId,
-            playerVars: { autoplay: 0, controls: 1, rel: 0, modestbranding: 1, playsinline: 1, origin: location.origin },
-            events: {
-                onReady: () => { if (generation !== playerGeneration) return; setPlayerStatus(''); isPlayerReady = true; updatePlayPauseButton(); applyPending(); },
-                onError: event => {
-                    if (generation !== playerGeneration) return;
-                    playerFailed = true;
-                    isPlayerReady = false;
-                    const message = [101, 150].includes(event.data)
-                        ? 'This video cannot be embedded. Try another YouTube video.'
-                        : 'YouTube could not play this video. Check the link or try another video.';
-                    setPlayerStatus(message); showToast(message);
-                },
-                onStateChange: (e) => {
-                    if (generation !== playerGeneration || consumeIgnore()) return;
-                    const playing = e.data === YT.PlayerState.PLAYING;
-                    const paused = e.data === YT.PlayerState.PAUSED;
-                    if (playing || paused) onLocalPlayPause(playing);
-                }
+    const mount = document.createElement('div');
+    stageEl().appendChild(mount);
+    const yt = new YT.Player(mount, {
+        height: '100%', width: '100%', videoId,
+        playerVars: { autoplay: 0, controls: 1, rel: 0, modestbranding: 1 },
+        events: {
+            onReady: () => { isPlayerReady = true; updatePlayPauseButton(); applyPending(); },
+            onStateChange: (e) => {
+                if (consumeIgnore()) return;
+                const playing = e.data === YT.PlayerState.PLAYING;
+                const paused = e.data === YT.PlayerState.PAUSED;
+                if (playing || paused) onLocalPlayPause(playing);
             }
-        });
-        vp = {
-            getCurrentTime: () => yt.getCurrentTime() || 0,
-            seekTo: (t) => yt.seekTo(t, true),
-            play: () => yt.playVideo(),
-            pause: () => yt.pauseVideo(),
-            destroy: () => yt.destroy()
-        };
-    }).catch(error => {
-        if (generation !== playerGeneration) return;
-        playerFailed = true;
-        setPlayerStatus(error.message || 'YouTube could not load. Try again.');
-        showToast(error.message || 'YouTube could not load. Try again.');
+        }
     });
+    vp = {
+        getCurrentTime: () => yt.getCurrentTime() || 0,
+        seekTo: (t) => yt.seekTo(t, true),
+        play: () => yt.playVideo(),
+        pause: () => yt.pauseVideo(),
+        destroy: () => yt.destroy()
+    };
 }
 
 // hls.js is only fetched the first time an HLS (.m3u8) stream is loaded.
 const HLS_JS_URL = 'https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.13/hls.min.js';
 let hlsJsPromise = null;
 function loadHlsJs() {
-    if (window.Hls) return Promise.resolve(window.Hls);
     if (!hlsJsPromise) {
         hlsJsPromise = new Promise((resolve, reject) => {
             const s = document.createElement('script');
-            const failed = () => {
-                clearTimeout(timer); s.remove(); hlsJsPromise = null;
-                reject(new Error('hls.js failed to load'));
-            };
-            const timer = setTimeout(failed, 15000);
             s.src = HLS_JS_URL;
-            s.onload = () => { clearTimeout(timer); window.Hls ? resolve(window.Hls) : failed(); };
-            s.onerror = failed;
+            s.onload = () => resolve(window.Hls);
+            s.onerror = () => { hlsJsPromise = null; reject(new Error('hls.js failed to load')); };
             document.head.appendChild(s);
         });
     }
@@ -763,14 +574,6 @@ function createDirectPlayer(src) {
             if (!v.isConnected) return;
             if (!Hls || !Hls.isSupported()) { v.src = src; return; }
             hls = new Hls();
-            hls.on(Hls.Events.ERROR, (_event, data) => {
-                if (!data.fatal || !v.isConnected) return;
-                playerFailed = true;
-                clearTimeout(slowTimer);
-                isPlayerReady = false;
-                const message = 'This stream could not load. Check the source link or try another stream.';
-                setPlayerStatus(message); showToast(message);
-            });
             // Listen before loading: the language list can arrive immediately.
             if (window.tracks) window.tracks.attachHls(hls);
             hls.loadSource(src);
@@ -792,12 +595,7 @@ function createDirectPlayer(src) {
         onBuffering: buffering => {
             document.getElementById('audioBufferingStatus').hidden = !buffering;
         },
-        onPlayError: () => {
-            ignoreNextStateChange = false;
-            autoplayBlocked = true;
-            updatePlayPauseButton();
-            setPlayerStatus('Your browser needs a click. Press Play to join the live video.');
-        }
+        onPlayError: () => { ignoreNextStateChange = false; showToast('Tap Play to resume playback'); }
     });
     if (window.tracks) window.tracks.attach(v, src);
     // Addon sources can take a minute to resolve; say so instead of showing a dead black box.
@@ -823,9 +621,6 @@ function createDirectPlayer(src) {
         socket.emit('video-seek', { currentTime: v.currentTime });
     });
     v.addEventListener('error', () => {
-        if (!v.isConnected) return;
-        playerFailed = true;
-        isPlayerReady = false;
         clearTimeout(slowTimer);
         setPlayerStatus('⚠️ This stream can\'t play in your browser — pick another one in 🍿 Browse.');
         showToast('This video can\'t play in your browser — try another stream from 🍿 Browse');
@@ -849,7 +644,7 @@ function ensurePlayer(state) {
     const kind = state.kind || 'yt';
     const key = kind === 'direct' ? state.src : state.videoId;
     if (!key) return false;
-    if (!vp || playerFailed || currentSrc !== key) {
+    if (!vp || currentSrc !== key) {
         kind === 'direct' ? createDirectPlayer(state.src) : createYouTubePlayer(state.videoId);
     }
     return true;
@@ -857,103 +652,44 @@ function ensurePlayer(state) {
 
 
 function wireVideoEvents() {
-    let subtitleSendQueue = Promise.resolve();
-    let subtitleReceiveQueue = Promise.resolve();
-    socket.on('subtitles-updated', payload => {
-        subtitleReceiveQueue = subtitleReceiveQueue.then(async () => {
-            if (payload.mediaId !== currentMediaId || payload.revision <= subtitleRevision) return;
-            const state = JSON.parse(await decryptText(roomKey, payload));
-            if (payload.mediaId !== currentMediaId) return;
-            subtitleRevision = payload.revision;
-            window.tracks?.applyShared(state, payload.sender === socket.id);
-        }).catch(() => showToast('The room subtitle could not be decrypted. Check your invite link.'));
-    });
-    let audioSendQueue = Promise.resolve();
-    let audioReceiveQueue = Promise.resolve();
-    const sendAudio = ({ mediaId, state }) => {
-        audioSendQueue = audioSendQueue.then(async () => {
-            if (!roomJoined || mediaId !== currentMediaId || settingsOwnerId !== socket.id) return;
-            const payload = await encryptText(roomKey, JSON.stringify(state));
-            if (mediaId !== currentMediaId) return;
-            const result = await new Promise((resolve, reject) => socket.timeout(8000).emit('set-audio', { ...payload, mediaId }, (error, data) => error ? reject(error) : resolve(data)));
-            if (!result?.ok) throw new Error('Could not share the starting audio language.');
-        }).catch(() => showToast('Could not share the starting audio language. Try selecting it again.'));
-    };
-    window.tracks?.configureRoom(({ mediaId, state }) => {
-        subtitleSendQueue = subtitleSendQueue.then(async () => {
-            if (!roomJoined || mediaId !== currentMediaId || settingsOwnerId !== socket.id) return;
-            const payload = await encryptText(roomKey, JSON.stringify(state));
-            if (mediaId !== currentMediaId) return;
-            const result = await new Promise((resolve, reject) => socket.timeout(10000).emit('set-subtitles', { ...payload, mediaId }, (error, data) => error ? reject(error) : resolve(data)));
-            if (!result?.ok) throw new Error('The subtitle could not be shared.');
-        }).catch(error => showToast(error.message));
-    }, sendAudio);
-    socket.on('audio-updated', payload => {
-        audioReceiveQueue = audioReceiveQueue.then(async () => {
-            if (payload.mediaId !== currentMediaId || payload.revision <= audioRevision) return;
-            const state = JSON.parse(await decryptText(roomKey, payload));
-            if (payload.mediaId !== currentMediaId) return;
-            audioRevision = payload.revision;
-            window.tracks?.applyRoomAudio(state);
-        }).catch(() => showToast('The room audio setting could not be decrypted.'));
-    });
-    socket.on('room-settings-owner', data => {
-        if (data.mediaId !== currentMediaId) return;
-        settingsOwnerId = data.settingsOwner;
-        window.tracks?.setSettingsOwner(settingsOwnerId === socket.id);
-    });
-    const setMedia = data => {
-        if (data.mediaId !== currentMediaId) {
-            currentMediaId = data.mediaId;
-            subtitleRevision = 0;
-            audioRevision = 0;
-            window.tracks?.setMedia(currentMediaId, data.src);
-        }
-        settingsOwnerId = data.settingsOwner;
-        window.tracks?.setSettingsOwner(settingsOwnerId === socket.id);
-    };
     socket.on('video-loaded', data => {
-        setMedia(data);
-        pendingState = playbackState(data);
         ensurePlayer(data);
         setNowPlaying(data.title);
         if (window.tracks && data.kind === 'direct') window.tracks.setContent(data.content);
-        if (isPlayerReady) applyPending();
         addSystemMessage(`🎬 ${data.user} loaded ${data.title ? `“${data.title}”` : 'a video'}`);
     });
     socket.on('video-playpause-sync', data => {
-        pendingState = playbackState(data);
         isVideoPlaying = data.isPlaying;
         updatePlayPauseButton();
-        if (vp && isPlayerReady) applyPending();
+        if (!vp || !isPlayerReady) { pendingState = { isPlaying: data.isPlaying, currentTime: data.currentTime }; return; }
+        ignoreNextStateChange = true;
+        if (data.currentTime) vp.seekTo(data.currentTime);
+        data.isPlaying ? vp.play() : vp.pause();
     });
     socket.on('video-progress-sync', data => {
-        const state = playbackState(data);
-        if (!isPlayerReady) { pendingState = state; return; }
         if (!vp || !isPlayerReady || vp.isBuffering?.()) return;
         if (vp.canSyncProgress && !vp.canSyncProgress()) return;
         if (Math.abs(vp.getCurrentTime() - data.currentTime) > 2) vp.seekTo(data.currentTime);
     });
     socket.on('video-seek', data => {
-        const state = playbackState({ ...data, isPlaying: roomPlayback?.isPlaying || false });
-        if (!isPlayerReady) pendingState = state;
         // Skip seeks to where we already are, so a stray echo can't start a loop.
         if (vp && isPlayerReady && Math.abs(vp.getCurrentTime() - data.currentTime) > 0.5) vp.seekTo(data.currentTime);
     });
     socket.on('video-sync', state => {
-        setMedia(state);
-        pendingState = playbackState(state);
         if (!ensurePlayer(state)) return;
         setNowPlaying(state.title);
         if (window.tracks && state.kind === 'direct') window.tracks.setContent(state.content);
         isVideoPlaying = state.isPlaying;
         updatePlayPauseButton();
-        if (isPlayerReady) applyPending();
+        if (!isPlayerReady) { pendingState = { isPlaying: state.isPlaying, currentTime: state.currentTime }; return; }
+        ignoreNextStateChange = true;
+        if (state.currentTime) vp.seekTo(state.currentTime);
+        state.isPlaying ? vp.play() : vp.pause();
     });
 
     // Periodically share our position so late joiners / drifters stay in sync.
     setInterval(() => {
-        if (vp && isPlayerReady && isVideoPlaying && !autoplayBlocked && !vp.isBuffering?.()) {
+        if (vp && isPlayerReady && isVideoPlaying && !vp.isBuffering?.()) {
             socket.emit('video-progress', { currentTime: vp.getCurrentTime() });
         }
     }, 4000);
@@ -970,58 +706,27 @@ function youtubeId(url) {
     return m ? m[1] : null;
 }
 
-// Only close the picker after the room server has accepted the load.
-async function requestVideoLoad(payload) {
-    if (!socket?.connected || !roomJoined) {
-        showToast('The room is reconnecting. Try loading the video again once connected.');
-        return false;
-    }
-    try {
-        const result = await new Promise((resolve, reject) => {
-            socket.timeout(8000).emit('load-video', payload, (error, data) => error
-                ? reject(new Error('The room did not respond. Check your connection and try again.'))
-                : resolve(data));
-        });
-        if (!result?.ok) throw new Error(result?.message || 'Could not load the video. Try again.');
-        return true;
-    } catch (error) {
-        showToast(error.message || 'The room did not respond. Check your connection and try again.');
-        return false;
-    }
-}
-
 // Loads a link from the Browse window's "YouTube" / "Paste link" tabs.
-async function loadVideo(inputId) {
+function loadVideo(inputId) {
     const input = document.getElementById(inputId);
     const url = input.value.trim();
     if (!url) { input.focus(); return; }
     const videoId = youtubeId(url);
-    let payload;
     if (videoId) {
-        payload = { kind: 'yt', videoId, url };
+        socket.emit('load-video', { kind: 'yt', videoId, url });
     } else if (inputId === 'youtubeUrl') {
         showToast('That doesn’t look like a YouTube video link'); return;
-    } else if (/^https?:\/\/\S+$/i.test(url)) {
-        payload = { kind: 'direct', src: url };
+    } else if (/^https?:\/\/\S+\.(mp4|webm|ogg|ogv|m4v|mov|m3u8)(\?\S*)?$/i.test(url)) {
+        socket.emit('load-video', { kind: 'direct', src: url });
     } else {
         showToast('Paste a direct video link (.mp4, .webm, .mov or .m3u8)'); return;
     }
-    if (!await requestVideoLoad(payload)) return;
     input.value = '';
     document.getElementById('browseModal').classList.remove('show');
 }
 
 function togglePlayPause() {
     if (!vp || !isPlayerReady) { showToast('Load a video first'); return; }
-    if (autoplayBlocked) {
-        autoplayBlocked = false;
-        setPlayerStatus('');
-        if (roomPlayback) vp.seekTo(playbackPosition(roomPlayback));
-        ignoreNextStateChange = true;
-        vp.play();
-        updatePlayPauseButton();
-        return;
-    }
     const shouldPlay = !isVideoPlaying;
     isVideoPlaying = shouldPlay;
     updatePlayPauseButton();
@@ -1032,8 +737,8 @@ function togglePlayPause() {
 
 function updatePlayPauseButton() {
     const btn = document.getElementById('playPauseBtn');
-    btn.querySelector('use').setAttribute('href', isVideoPlaying && !autoplayBlocked ? '#i-pause' : '#i-play');
-    btn.querySelector('.label').textContent = isVideoPlaying && !autoplayBlocked ? 'Pause' : 'Play';
+    btn.querySelector('use').setAttribute('href', isVideoPlaying ? '#i-pause' : '#i-play');
+    btn.querySelector('.label').textContent = isVideoPlaying ? 'Pause' : 'Play';
 }
 
 function syncVideo() {
@@ -1105,19 +810,11 @@ function markActive() {
     if (theater) idleTimer = setTimeout(() => appEl.classList.add('idle'), 3000);
 }
 
-function updateRoomShare() {
-    document.getElementById('roomCode').textContent = roomCode;
-    document.getElementById('roomShare').hidden = !roomCode || theater ||
-        !!(document.fullscreenElement || document.webkitFullscreenElement) ||
-        matchMedia('(display-mode: fullscreen)').matches;
-}
-
 function setTheater(on) {
     if (on === theater) return;
     theater = on;
     theaterChat = false;
     appEl.classList.toggle('theater', on);
-    updateRoomShare();
     const btn = document.getElementById('fullscreenBtn');
     btn.setAttribute('aria-pressed', String(on));
     if (on) {
@@ -1150,11 +847,9 @@ function wireTheater() {
     // Leaving real full screen (Esc, system gesture) also leaves the layout.
     const onFsChange = () => {
         if (theater && !(document.fullscreenElement || document.webkitFullscreenElement)) setTheater(false);
-        updateRoomShare();
     };
     document.addEventListener('fullscreenchange', onFsChange);
     document.addEventListener('webkitfullscreenchange', onFsChange);
-    matchMedia('(display-mode: fullscreen)').addEventListener('change', updateRoomShare);
     ['pointermove', 'pointerdown', 'keydown'].forEach(ev => document.addEventListener(ev, () => { if (theater) markActive(); }, { passive: true }));
 }
 
@@ -1198,16 +893,6 @@ function wireControls() {
         socket.emit('typing-start');
         clearTimeout(typingTimer);
         typingTimer = setTimeout(() => socket.emit('typing-stop'), 1000);
-    });
-
-    document.getElementById('copyRoomCodeBtn').addEventListener('click', async () => {
-        if (!roomCode) return;
-        try {
-            await navigator.clipboard.writeText(roomCode);
-            showToast('Room code copied');
-        } catch {
-            prompt('Copy this room code:', roomCode);
-        }
     });
 
     document.getElementById('shareBtn').addEventListener('click', async () => {
@@ -1323,12 +1008,3 @@ function updatePollResults() {
         container.appendChild(div);
     });
 }
-
-async function restoreBrowserSession() {
-    if (!isJoining) return;
-    const saved = window.reddateBrowserSession.resumeForRoom(existing.roomId);
-    if (!saved) return;
-    usernameInput.value = saved.name;
-    await enterFromLobby(false);
-}
-restoreBrowserSession();
