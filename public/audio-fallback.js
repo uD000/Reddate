@@ -15,6 +15,15 @@
 
         const changed = () => { if (!disposed) onChange(); };
         const defaultTrack = () => session && (session.tracks.find(t => t.isDefault) || session.tracks[0]);
+        // Whether the browser can decode a track itself. Chrome and Firefox can't decode Dolby (AC-3 / E-AC-3),
+        // DTS or TrueHD: such a track plays picture only, so it goes through the server's decoder instead.
+        const MIME = { aac: 'audio/mp4; codecs="mp4a.40.2"', mp3: 'audio/mpeg', opus: 'audio/webm; codecs="opus"',
+            vorbis: 'audio/webm; codecs="vorbis"', flac: 'audio/flac', ac3: 'audio/mp4; codecs="ac-3"', eac3: 'audio/mp4; codecs="ec-3"' };
+        const browserDecodes = track => !!track && !!MIME[track.codec] && video.canPlayType(MIME[track.codec]) !== '';
+        // The browser's own audio is used for the default track only when it can decode it.
+        const usesOriginal = track => track === defaultTrack() && browserDecodes(track);
+        // Nothing the browser can decode: the file would be silent, so decode its default track from the start.
+        const needsDecoder = () => !!session && !session.tracks.some(browserDecodes);
         const context = () => {
             if (!sharedContext) sharedContext = new (window.AudioContext || window.webkitAudioContext)();
             if (!gain) { gain = sharedContext.createGain(); gain.connect(sharedContext.destination); }
@@ -80,6 +89,7 @@
                     selected = defaultTrack().index;
                     status = '';
                     changed();
+                    autoDecode();
                     return session;
                 } catch (e) {
                     if (!disposed) { status = e.name === 'AbortError' ? '' : e.message; changed(); }
@@ -184,7 +194,7 @@
             const track = session.tracks.find(t => t.index === index);
             if (!track) return;
             const request = ++selectionId;
-            if (track === defaultTrack()) {
+            if (usesOriginal(track)) {
                 pendingIndex = null;
                 if (active) warmedIndex = selected;
                 restoreOriginal(); trimCache(); status = ''; changed(); return;
@@ -234,6 +244,23 @@
             video.addEventListener(event, fn);
             listeners.push(() => video.removeEventListener(event, fn));
         }
+        // A file the browser can't hear at all (Dolby-only, DTS…) starts on the server-decoded default track.
+        // Web Audio may start only after the viewer has used the page, so it is tried again on play and on a tap.
+        let autoTries = 0;
+        function autoDecode() {
+            if (disposed || active || pendingIndex !== null || !needsDecoder() || autoTries >= 3) return;
+            autoTries++;
+            select(defaultTrack().index).catch(() => {});
+        }
+        listen('play', autoDecode);
+        // Resuming inside the tap itself is what Chrome accepts; one asked for earlier stays pending until then.
+        const onGesture = () => {
+            if (sharedContext && sharedContext.state !== 'running') sharedContext.resume().catch(() => {});
+            autoDecode();
+        };
+        document.addEventListener('pointerdown', onGesture, true);
+        document.addEventListener('keydown', onGesture, true);
+        listeners.push(() => { document.removeEventListener('pointerdown', onGesture, true); document.removeEventListener('keydown', onGesture, true); });
         ['pause', 'ended'].forEach(event => listen(event, stopNodes));
         listen('seeking', () => {
             recovering = true;
