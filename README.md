@@ -40,7 +40,7 @@ viewer. Temporary audio buffering holds only that viewer's picture.
 
 <p align="center">
   <a href="LICENSE"><img alt="MIT licence" src="https://img.shields.io/badge/licence-MIT-ff6a32?style=flat-square"></a>
-  <a href="../../releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/UdayHelps/Reddate?style=flat-square&color=ff6a32"></a>
+  <a href="../../releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/uD000/Reddate?style=flat-square&color=ff6a32"></a>
   <img alt="Android TV" src="https://img.shields.io/badge/Android%20TV-Kotlin%20%2B%20Compose-1d1917?style=flat-square">
   <img alt="Node 18+" src="https://img.shields.io/badge/Node-18%2B-1d1917?style=flat-square">
   <img alt="Stremio addon format" src="https://img.shields.io/badge/addons-Stremio%20format-1d1917?style=flat-square">
@@ -123,7 +123,7 @@ Read more in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 ## Run it yourself
 
 ```bash
-git clone https://github.com/UdayHelps/Reddate.git
+git clone https://github.com/uD000/Reddate.git
 cd Reddate
 npm install
 npm start            # http://localhost:3000

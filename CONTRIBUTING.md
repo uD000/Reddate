@@ -8,7 +8,7 @@ database to run locally.
 ## Run it locally (about 2 minutes)
 
 ```bash
-git clone https://github.com/<you>/Reddate.git   # your fork of UdayHelps/Reddate
+git clone https://github.com/<you>/Reddate.git   # your fork of uD000/Reddate
 cd Reddate
 npm install
 npm start          # http://localhost:3000   (npm run dev auto-reloads)
