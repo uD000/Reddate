@@ -8,6 +8,7 @@ export function Profiles({ first, onDone }: { first?: boolean; onDone?: () => vo
     const [dlg, setDlg] = useState<null | { id: string | null; name: string; main: boolean }>(null);
     const [busy, setBusy] = useState(false);
     const [armed, setArmed] = useState(false);
+    const current = st.profiles.find(p => p.id === st.profileId);
 
     async function choose(id: string) {
         await engine.call('chooseProfile', { id });
@@ -52,7 +53,9 @@ export function Profiles({ first, onDone }: { first?: boolean; onDone?: () => vo
                 </div>
                 <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
                     <button className="btn" onClick={() => setEdit(!edit)}>{edit ? 'Done' : 'Edit profiles'}</button>
-                    {!first && <button className="btn ghost" onClick={() => go('/account')}>Back</button>}
+                    {/* The chooser never traps you: carry on as the profile that's on now. */}
+                    {first && !edit && onDone && current && <button className="btn primary" onClick={onDone}>Continue as {current.name}</button>}
+                    {!first && <button className="btn ghost" onClick={() => back('/account')}>Back</button>}
                 </div>
             </div>
             {dlg && (

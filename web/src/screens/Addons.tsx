@@ -36,7 +36,10 @@ export function Addons() {
             else { setUrl(''); toast('Addon added'); await load(); }
         } catch (ex: any) { setErr(ex.message || 'Couldn’t add that.'); } finally { setBusy(false); }
     }
-    const kinds = (a: AddonItem) => [a.catalog && 'Catalogs', a.stream && 'Streams', a.subtitles && 'Subtitles'].filter(Boolean).join(' · ') || (a.loaded ? 'Other' : 'Not loading');
+    // An addon whose manifest didn't load is named by its address, and says why it has no details.
+    const kinds = (a: AddonItem) => [a.catalog && 'Catalogs', a.stream && 'Streams', a.subtitles && 'Subtitles'].filter(Boolean).join(' · ') ||
+        (a.loaded ? 'Other' : a.enabled ? 'Couldn’t reach this addon right now' : 'Switched off');
+    const nameOf = (a: AddonItem) => (a.loaded ? a.name : a.host || a.name);
     return (
         <main className="page" style={{ maxWidth: 820 }}>
             <h1>Addons</h1>
@@ -50,9 +53,9 @@ export function Addons() {
             <div className="list">
                 {(list || []).map(a => (
                     <div className="item" key={a.url} style={{ opacity: a.enabled ? 1 : .6 }}>
-                        <Logo src={a.logo} name={a.name} />
-                        <div className="grow"><b>{a.name}</b><span className="note">{kinds(a)}{a.description ? ' · ' + a.description : ''}</span></div>
-                        <button className={'switch' + (a.enabled ? ' on' : '')} aria-label={a.enabled ? 'Turn off' : 'Turn on'} onClick={async () => { await engine.call('addonEnable', { url: a.url, on: !a.enabled }); load(); }} />
+                        <Logo src={a.logo} name={nameOf(a)} />
+                        <div className="grow"><b>{nameOf(a)}</b><span className="note">{kinds(a)}{a.description ? ' · ' + a.description : ''}</span></div>
+                        <button className={'switch' + (a.enabled ? ' on' : '')} aria-label={(a.enabled ? 'Turn off ' : 'Turn on ') + nameOf(a)} onClick={async () => { await engine.call('addonEnable', { url: a.url, on: !a.enabled }); load(); }} />
                         {a.builtIn && /\/yt\/manifest\.json$/.test(a.url) && <a className="btn small primary" href="/yt" target="_blank" rel="noopener">Set up</a>}
                         {!a.builtIn && <button className="btn small ghost" onClick={async () => { await engine.call('addonRemove', { url: a.url }); toast('Removed'); load(); }}>Remove</button>}
                     </div>

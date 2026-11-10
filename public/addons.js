@@ -1535,6 +1535,15 @@ window.initAddons = function (socket, { getRoomId, toast }) {
                 };
             }),
             add: addAddonUrl,
+            // Names for the Addons screen: a switched-off addon is never loaded for playing, so without this it would
+            // show as "Unavailable". Reading its manifest doesn't switch it on. Waits up to maxMs.
+            async describeAll(maxMs) {
+                await ready;
+                const urls = [...activeBuiltIns(), ...roomAddonUrls].filter(u => !manifests.get(u));
+                if (!urls.length) return;
+                const all = urls.map(u => loadManifest(u).catch(() => null));
+                await Promise.race([Promise.allSettled(all), new Promise(r => setTimeout(r, maxMs || 6000))]);
+            },
             async remove(url) {
                 if (BUILT_INS.includes(url)) { togglePref('builtinsRemoved', url, true); afterAddonChange(); return; }
                 await removeAddon(url);

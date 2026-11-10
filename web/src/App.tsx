@@ -13,6 +13,23 @@ import { LinkTv } from './screens/LinkTv';
 import { Onboarding } from './screens/Onboarding';
 import { IHome, ISearch, IUsers, IUser, IBack, Wordmark } from './icons';
 
+// "Who's watching?" asks once per browser, not once per tab: a pick is remembered for 12 hours here, so a new tab,
+// a shared link or a reload goes straight in. Signing out forgets it.
+const PICK_TTL = 12 * 60 * 60 * 1000;
+export function pickedRecently(): boolean {
+    try {
+        if (sessionStorage.getItem('rd-picked') === '1') return true;
+        const at = Number(localStorage.getItem('rd-picked-at') || 0);
+        return at > 0 && Date.now() - at < PICK_TTL;
+    } catch { return false; }
+}
+export function markPicked() {
+    try { sessionStorage.setItem('rd-picked', '1'); localStorage.setItem('rd-picked-at', String(Date.now())); } catch { /* fine */ }
+}
+export function forgetPicked() {
+    try { sessionStorage.removeItem('rd-picked'); localStorage.removeItem('rd-picked-at'); } catch { /* fine */ }
+}
+
 export interface AppState { signedIn: boolean; accounts: boolean; profile: string; profileId: string; profiles: { id: string; name: string; main?: boolean }[]; inRoom: boolean; roomCode: string; invite: string; nowPlaying: string; isGuest: boolean; hostName: string }
 interface Ctx {
     path: string; go: (to: string, replace?: boolean) => void; back: (fallback?: string) => void; toast: (m: string) => void;
@@ -56,7 +73,7 @@ export function App() {
         }
     }, []);
     const [toastMsg, setToastMsg] = useState('');
-    const [picked, setPicked] = useState<boolean>(() => { try { return sessionStorage.getItem('rd-picked') === '1'; } catch { return false; } });
+    const [picked, setPicked] = useState<boolean>(pickedRecently);
     const metaCache = useRef(new Map<string, Json>()).current;
     const [invite, setInvite] = useState<null | { roomId: string; from: string; device: string; title: string }>(null);
     const toastT = useRef<number>();
@@ -158,7 +175,7 @@ export function App() {
                     {invite.device ? <> · from {invite.device}</> : null}
                 </p>
                 <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
-                    <button className="btn primary lg" autoFocus onClick={async () => { const i = invite; setInvite(null); try { sessionStorage.setItem('rd-picked', '1'); localStorage.setItem('rd-onboarded', '1'); sessionStorage.removeItem('rd-new'); } catch { /* fine */ } setPicked(true); try { await engine.call('answerInvite', { roomId: i.roomId, accept: true }); } catch { /* fine */ } go('/watch'); }}>Join the party</button>
+                    <button className="btn primary lg" autoFocus onClick={async () => { const i = invite; setInvite(null); try { markPicked(); localStorage.setItem('rd-onboarded', '1'); sessionStorage.removeItem('rd-new'); } catch { /* fine */ } setPicked(true); try { await engine.call('answerInvite', { roomId: i.roomId, accept: true }); } catch { /* fine */ } go('/watch'); }}>Join the party</button>
                     <button className="btn ghost lg" onClick={() => { const i = invite; setInvite(null); engine.call('answerInvite', { roomId: i.roomId, accept: false }).catch(() => {}); }}>Not now</button>
                 </div>
             </div>
@@ -169,11 +186,11 @@ export function App() {
     // A brand-new account: a few short steps, each skippable, with a way straight into the app.
     const isNew = (() => { try { return sessionStorage.getItem('rd-new') === '1' && localStorage.getItem('rd-onboarded') !== '1'; } catch { return false; } })();
     if (isNew && !link && !joinMatch && !st.inRoom && pathname !== '/watch') {
-        return <C.Provider value={ctx}>{inviteModal}<Onboarding onFinish={(to) => { try { sessionStorage.removeItem('rd-new'); localStorage.setItem('rd-onboarded', '1'); sessionStorage.setItem('rd-picked', '1'); } catch { /* fine */ } setPicked(true); go(to || '/', true); }} />{toastMsg && <div className="toast">{toastMsg}</div>}</C.Provider>;
+        return <C.Provider value={ctx}>{inviteModal}<Onboarding onFinish={(to) => { try { sessionStorage.removeItem('rd-new'); localStorage.setItem('rd-onboarded', '1'); markPicked(); } catch { /* fine */ } setPicked(true); go(to || '/', true); }} />{toastMsg && <div className="toast">{toastMsg}</div>}</C.Provider>;
     }
     if (link) return <C.Provider value={ctx}>{inviteModal}<LinkTv code={link} onDone={() => { try { sessionStorage.removeItem('rd-link'); } catch { /* fine */ } setLink(''); go('/', true); }} />{toastMsg && <div className="toast">{toastMsg}</div>}</C.Provider>;
     if (!picked && st.profiles.length > 1 && !joinMatch) {
-        return <C.Provider value={ctx}><Profiles first onDone={() => { try { sessionStorage.setItem('rd-picked', '1'); } catch { /* fine */ } setPicked(true); }} />{inviteModal}</C.Provider>;
+        return <C.Provider value={ctx}><Profiles first onDone={() => { try { markPicked(); } catch { /* fine */ } setPicked(true); }} />{inviteModal}</C.Provider>;
     }
 
     let page: React.ReactNode;
@@ -195,7 +212,7 @@ export function App() {
             <div className={'shell' + (pathname === '/' || pathname === '/link' || pathname.startsWith('/title/') ? ' over' : '') + (scrolled ? ' scrolled' : '')}>
                 {!full && (
                     <header className="topbar">
-                        {pathname !== '/' && <button className="back" aria-label="Back" onClick={() => back()}><IBack width={20} height={20} /></button>}
+                        {pathname !== '/' && <button className="back" aria-label="Back" onClick={() => back()}><IBack width={18} height={18} /><span className="back-label">Back</span></button>}
                         <a className="brand" href="/" onClick={e => { e.preventDefault(); go('/'); }}><Wordmark size={28} /></a>
                         <nav className="nav" aria-label="Main">
                             <a href="/" className={nav === 'home' ? 'on' : ''} onClick={e => { e.preventDefault(); go('/'); }}><IHome />Home</a>

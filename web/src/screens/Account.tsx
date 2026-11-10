@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { engine, Json } from '../engine';
-import { useApp } from '../App';
+import { useApp, forgetPicked } from '../App';
 import { authApi } from '../api';
 
 export function Account() {
@@ -42,7 +42,7 @@ export function Account() {
             <div className="list">
                 <button className="item" onClick={() => go('/profiles')}><div className="grow" style={{ textAlign: 'left' }}><b>Switch or edit profiles</b><span className="note">{st.profiles.length} on this account</span></div></button>
                 <button className="item" onClick={() => go('/addons')}><div className="grow" style={{ textAlign: 'left' }}><b>Addons</b><span className="note">Turn them on or off, remove or add</span></div></button>
-                <button className="item" onClick={async () => { await engine.call('signOut').catch(() => {}); try { sessionStorage.removeItem('rd-picked'); } catch { /* fine */ } await refresh(); go('/', true); location.reload(); }}><div className="grow" style={{ textAlign: 'left' }}><b>Sign out of this browser</b><span className="note">{a && a.device}</span></div></button>
+                <button className="item" onClick={async () => { await engine.call('signOut').catch(() => {}); forgetPicked(); await refresh(); go('/', true); location.reload(); }}><div className="grow" style={{ textAlign: 'left' }}><b>Sign out of this browser</b><span className="note">{a && a.device}</span></div></button>
             </div>
             <section className="card" style={{ marginTop: 22 }}>
                 <h2>Devices &amp; TVs</h2>

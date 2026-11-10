@@ -632,7 +632,7 @@
             return true;
         },
         // ---- the app's own Addons and Account screens ----
-        async addons() { await window.reddateAddons.ready; return window.reddateAddons.manage.list(); },
+        async addons() { await window.reddateAddons.ready; await window.reddateAddons.manage.describeAll(6000); return window.reddateAddons.manage.list(); },
         async addonAdd({ url }) { const r = await window.reddateAddons.manage.add(String(url || '')); (window.__homeMaybeChanged || (() => {}))(true); return r; },
         async addonRemove({ url }) { await window.reddateAddons.manage.remove(String(url)); (window.__homeMaybeChanged || (() => {}))(true); return true; },
         async syncAddons() { return window.reddateAddons.manage.resync(); },
