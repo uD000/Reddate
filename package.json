@@ -6,7 +6,7 @@
   "author": "Uday Katare",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/UdayHelps/Reddate.git"
+    "url": "git+https://github.com/uD000/Reddate.git"
   },
   "homepage": "https://reddate.xyz",
   "main": "server.js",
@@ -34,6 +34,6 @@
     "nodejs"
   ],
   "bugs": {
-    "url": "https://github.com/UdayHelps/Reddate/issues"
+    "url": "https://github.com/uD000/Reddate/issues"
   }
 }

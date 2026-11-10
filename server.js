@@ -233,7 +233,7 @@ app.get('/api/app-version', (_req, res) => {
 const apkFile = path.join(__dirname, 'downloads', 'reddate-tv.apk');
 // The app file is a GitHub Release asset, so downloads cost this server no bandwidth (set APK_URL to host it elsewhere).
 // A copy placed in downloads/ is served from here instead (self-hosting).
-const APK_URL = process.env.APK_URL || 'https://github.com/UdayHelps/Reddate/releases/latest/download/reddate-tv.apk';
+const APK_URL = process.env.APK_URL || 'https://github.com/uD000/Reddate/releases/latest/download/reddate-tv.apk';
 const hasLocalApk = () => require('fs').existsSync(apkFile);
 app.get(['/get', '/downloads/reddate-tv.apk'], (_req, res) => {
     if (!hasLocalApk()) return res.redirect(302, APK_URL);
